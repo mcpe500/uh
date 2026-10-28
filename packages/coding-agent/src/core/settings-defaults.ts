@@ -64,4 +64,26 @@ export const SETTINGS_DEFAULTS = {
 	fullscreenScrollbar: "auto",
 	fullscreenCopyOnSelect: true,
 	fullscreenWheelScrollLines: "auto",
+	uHarness: {
+		pipeline: "u-shaped",
+		slm: {
+			baseUrl: "http://localhost:8000/v1",
+			model: "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+			apiKey: "none",
+			maxTokens: 1024,
+			temperature: 0.2,
+		},
+		coreReasoner: {
+			provider: "deepseek",
+			model: "deepseek-coder",
+			temperature: 0.3,
+		},
+		clm: {
+			enabled: true,
+			workingMemoryPath: ".context/working_memory.md",
+		},
+		tripletConfluence: {
+			canonicalMarker: "### FILE:",
+		},
+	},
 } as const;

@@ -203,6 +203,48 @@ const SkillsInputSchema = Type.Union(
 	{ description: "Local skill file paths or directories." },
 );
 
+const UHarnessPipelineModeSchema = Type.Union([Type.Literal("baseline"), Type.Literal("u-shaped")], {
+	default: SETTINGS_DEFAULTS.uHarness.pipeline,
+	description:
+		"Pipeline architecture: 'baseline' for monolithic cloud or 'u-shaped' for token-efficient dual-model pipeline.",
+});
+
+const UHarnessSlmSettingsSchema = Type.Object({
+	provider: Type.Optional(Type.String({ default: "openai" })),
+	baseUrl: Type.Optional(Type.String({ default: SETTINGS_DEFAULTS.uHarness.slm.baseUrl })),
+	model: Type.Optional(Type.String({ default: SETTINGS_DEFAULTS.uHarness.slm.model })),
+	apiKey: Type.Optional(Type.String({ default: SETTINGS_DEFAULTS.uHarness.slm.apiKey })),
+	maxTokens: Type.Optional(Type.Number({ default: SETTINGS_DEFAULTS.uHarness.slm.maxTokens })),
+	temperature: Type.Optional(Type.Number({ default: SETTINGS_DEFAULTS.uHarness.slm.temperature })),
+});
+
+const UHarnessCoreReasonerSettingsSchema = Type.Object({
+	provider: Type.Optional(Type.String({ default: SETTINGS_DEFAULTS.uHarness.coreReasoner.provider })),
+	model: Type.Optional(Type.String({ default: SETTINGS_DEFAULTS.uHarness.coreReasoner.model })),
+	temperature: Type.Optional(Type.Number({ default: SETTINGS_DEFAULTS.uHarness.coreReasoner.temperature })),
+});
+
+const UHarnessClmSettingsSchema = Type.Object({
+	enabled: Type.Optional(Type.Boolean({ default: SETTINGS_DEFAULTS.uHarness.clm.enabled })),
+	workingMemoryPath: Type.Optional(Type.String({ default: SETTINGS_DEFAULTS.uHarness.clm.workingMemoryPath })),
+});
+
+const UHarnessTripletSettingsSchema = Type.Object({
+	canonicalMarker: Type.Optional(
+		Type.String({ default: SETTINGS_DEFAULTS.uHarness.tripletConfluence.canonicalMarker }),
+	),
+});
+
+export const UHarnessSettingsSchema = Type.Object({
+	pipeline: Type.Optional(UHarnessPipelineModeSchema),
+	slm: Type.Optional(UHarnessSlmSettingsSchema),
+	coreReasoner: Type.Optional(UHarnessCoreReasonerSettingsSchema),
+	clm: Type.Optional(UHarnessClmSettingsSchema),
+	tripletConfluence: Type.Optional(UHarnessTripletSettingsSchema),
+});
+
+export type UHarnessSettings = Static<typeof UHarnessSettingsSchema>;
+
 export const SettingsSchema = Type.Object(
 	{
 		$schema: Type.Optional(Type.String({ description: "JSON Schema reference." })),
@@ -247,6 +289,7 @@ export const SettingsSchema = Type.Object(
 		compaction: Type.Optional(CompactionSettingsSchema),
 		branchSummary: Type.Optional(BranchSummarySettingsSchema),
 		retry: Type.Optional(RetrySettingsSchema),
+		uHarness: Type.Optional(UHarnessSettingsSchema),
 		hideThinkingBlock: Type.Optional(Type.Boolean({ default: SETTINGS_DEFAULTS.hideThinkingBlock })),
 		showCacheMissNotices: Type.Optional(
 			Type.Boolean({
