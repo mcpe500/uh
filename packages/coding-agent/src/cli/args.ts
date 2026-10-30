@@ -38,6 +38,8 @@ export interface Args {
 	noMcp?: boolean;
 	print?: boolean;
 	export?: string;
+	pipeline?: "baseline" | "u-shaped";
+	slmUrl?: string;
 	noSkills?: boolean;
 	skills?: string[];
 	promptTemplates?: string[];
@@ -244,6 +246,25 @@ export function parseArgs(args: string[]): Args {
 			result.projectTrustOverride = false;
 		} else if (arg === "--offline") {
 			result.offline = true;
+		} else if (arg === "--pipeline") {
+			const pipelineVal = args[i + 1];
+			if (pipelineVal === "baseline" || pipelineVal === "u-shaped") {
+				result.pipeline = pipelineVal;
+				i++;
+			} else {
+				result.diagnostics.push({
+					type: "error",
+					message: "--pipeline requires 'baseline' or 'u-shaped'",
+				});
+			}
+		} else if (arg === "--slm-url") {
+			const url = args[i + 1];
+			if (url === undefined || url.startsWith("-")) {
+				result.diagnostics.push({ type: "error", message: "--slm-url requires a URL" });
+			} else {
+				result.slmUrl = url;
+				i++;
+			}
 		} else if (arg.startsWith("@")) {
 			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
 		} else if (arg.startsWith("--")) {
@@ -305,6 +326,8 @@ ${chalk.bold("Options:")}
   --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
   --mode <mode>                  Output mode: text (default), json, or rpc
   --print, -p                    Non-interactive mode: process prompt and exit
+  --pipeline <mode>              U-Harness mode: baseline or u-shaped (default from settings)
+  --slm-url <url>                SLM vLLM endpoint URL (e.g. http://localhost:8000/v1)
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume
   --session <path|id>            Use specific session file or partial UUID

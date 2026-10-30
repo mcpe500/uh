@@ -3,6 +3,116 @@
     <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
   </a>
 </p>
+
+> [!NOTE]
+> **Research Fork Notice**: This repository is a research fork of [Pi (earendil-works/pi)](https://github.com/earendil-works/pi) by Mario Zechner ([@badlogic](https://github.com/badlogic)) and Earendil Works. See [FORK.md](./FORK.md) for complete attribution and research scope.
+
+---
+
+## U-Shape Harness (Token-Efficient Orchestration)
+
+This fork incorporates the **U-Shape Harness Pipeline** and **Context Language Model (CLM)** architecture for academic research on token efficiency and dual-model orchestration:
+
+```text
+(spesifikasi_tugas, konteks_repository)
+    -> 1. kompresi_masukan        (SLM lokal: vLLM Qwen2.5-Coder-1.5B)
+    -> Architectural Brief (~80 tok)
+    -> 2. penalaran_inti          (Model Cloud: DeepSeek / Claude / OpenAI)
+    -> Blueprint Solusi
+    -> 3. dekompresi_keluaran     (SLM lokal: Triplet Input Confluence)
+    -> Berkas kode lengkap (### FILE:)
+    -> 4. sandbox & verifikasi
+         -> gagal: 6. kompresi_log (SLM) -> Dense Failure Trace -> loop ke 2
+```
+
+### Configuration via Native `.pi/settings.json`
+
+Configure the U-Harness directly inside `.pi/settings.json` (or `~/.pi/agent/settings.json`) without external config files:
+
+```json
+{
+  "uHarness": {
+    "pipeline": "u-shaped",
+    "slm": {
+      "baseUrl": "http://localhost:8000/v1",
+      "model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+      "apiKey": "none",
+      "maxTokens": 1024,
+      "temperature": 0.2
+    },
+    "coreReasoner": {
+      "provider": "deepseek",
+      "model": "deepseek-coder",
+      "temperature": 0.3
+    },
+    "clm": {
+      "enabled": true,
+      "workingMemoryPath": ".context/working_memory.md"
+    },
+    "tripletConfluence": {
+      "canonicalMarker": "### FILE:"
+    }
+  }
+}
+```
+
+### Running on Google Colab with Self-Hosted vLLM
+
+To run the agent in Google Colab with a self-hosted vLLM instance serving the local Small Language Model (SLM) on a free T4/L4/A100 GPU:
+
+#### 1. Install Bun in Colab
+```bash
+!curl -fsSL https://bun.sh/install | bash
+import os
+os.environ["PATH"] += ":/root/.bun/bin"
+```
+
+#### 2. Install & Start vLLM on Colab GPU
+```bash
+!pip install vllm
+!nohup python3 -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen2.5-Coder-1.5B-Instruct \
+    --port 8000 \
+    --max-model-len 8192 \
+    --gpu-memory-utilization 0.90 \
+    --trust-remote-code > vllm.log 2>&1 &
+```
+
+#### 3. Verify vLLM is Ready
+```bash
+!curl http://localhost:8000/v1/models
+```
+
+#### 4. Configure & Execute Agent (Print Mode for Colab)
+```bash
+# Clone and setup project in Colab
+!git clone https://github.com/mcpe500/uh.git
+%cd uh
+!bun install
+
+# Configure settings
+!mkdir -p .pi
+!cat << 'EOF' > .pi/settings.json
+{
+  "uHarness": {
+    "pipeline": "u-shaped",
+    "slm": {
+      "baseUrl": "http://localhost:8000/v1",
+      "model": "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+    }
+  }
+}
+EOF
+
+# Run task with U-Shape Pipeline
+!bun run packages/coding-agent/src/cli.ts -p "Fix off-by-one error in fibonacci.py"
+
+# Or run baseline monolithic mode for evaluation comparison:
+!bun run packages/coding-agent/src/cli.ts -p "Fix off-by-one error in fibonacci.py" --pipeline baseline
+```
+
+---
+
 <p align="center">
   <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
   <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
