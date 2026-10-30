@@ -2,7 +2,7 @@ import type { UHarnessSettings } from "../settings-schema.ts";
 import { ContextLanguageModel } from "./clm.ts";
 import { buildInboundCompressorPrompt, parseArchitecturalBrief } from "./compressor.ts";
 import { extractCanonicalPatches, formatTripletPrompt } from "./decompressor.ts";
-import type { TurnExecutionInput, TurnExecutionResult, UHarnessTelemetry } from "./types.ts";
+import type { RepoFile, TurnExecutionInput, TurnExecutionResult, UHarnessTelemetry } from "./types.ts";
 
 /**
  * U-Harness Provider Bridge.
@@ -49,6 +49,16 @@ export class UHarnessBridge {
 
 		const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
 		return data.choices?.[0]?.message?.content ?? "";
+	}
+
+	/**
+	 * Runs the inbound compression stage only and returns the architectural brief.
+	 * This is the runtime entry point used when the cloud reasoner is the normal agent model.
+	 */
+	async compressInbound(task: string, files: RepoFile[]): Promise<string> {
+		const prompt = buildInboundCompressorPrompt(task, files);
+		const raw = await this.callSlmDefault(prompt);
+		return parseArchitecturalBrief(raw).raw;
 	}
 
 	/**
