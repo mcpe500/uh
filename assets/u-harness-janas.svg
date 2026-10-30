@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="janas" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f97316"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="uh" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="720" fill="url(#bg)"/>
+  <text x="60" y="76" fill="#e2e8f0" font-family="Inter, Segoe UI, sans-serif" font-size="34" font-weight="700">
+    U-Harness × Janas local SLM
+  </text>
+  <text x="60" y="110" fill="#94a3b8" font-family="Inter, Segoe UI, sans-serif" font-size="17">
+    Optional local SLM provider · separate process · random localhost port · auto-stop on session shutdown
+  </text>
+
+  <rect x="60" y="170" width="300" height="180" rx="18" fill="#0b1220" stroke="#1f2937"/>
+  <text x="84" y="206" fill="#7dd3fc" font-family="Inter, Segoe UI, sans-serif" font-size="20" font-weight="700">
+    pi session
+  </text>
+  <text x="84" y="240" fill="#cbd5f5" font-family="Inter, Segoe UI, sans-serif" font-size="15">
+    user prompt
+  </text>
+  <text x="84" y="270" fill="#cbd5f5" font-family="Inter, Segoe UI, sans-serif" font-size="15">
+    before_agent_start
+  </text>
+  <text x="84" y="300" fill="#cbd5f5" font-family="Inter, Segoe UI, sans-serif" font-size="15">
+    /slm-set janas &lt;model&gt;
+  </text>
+
+  <rect x="450" y="170" width="320" height="180" rx="18" fill="#0b1220" stroke="#1f2937"/>
+  <text x="474" y="206" fill="#a5b4fc" font-family="Inter, Segoe UI, sans-serif" font-size="20" font-weight="700">
+    U-Harness bridge
+  </text>
+  <text x="474" y="240" fill="#cbd5f5" font-family="Inter, Segoe UI, sans-serif" font-size="15">
+    inbound compressor
+  </text>
+  <text x="474" y="270" fill="#cbd5f5" font-family="Inter, Segoe UI, sans-serif" font-size="15">
+    architectural brief
+  </text>
+  <text x="474" y="300" fill="#cbd5f5" font-family="Inter, Segoe UI, sans-serif" font-size="15">
+    system prompt injection
+  </text>
+
+  <rect x="860" y="170" width="280" height="180" rx="18" fill="#112033" stroke="url(#janas)"/>
+  <text x="884" y="206" fill="#fdba74" font-family="Inter, Segoe UI, sans-serif" font-size="20" font-weight="700">
+    Janas server
+  </text>
+  <text x="884" y="240" fill="#f8fafc" font-family="Inter, Segoe UI, sans-serif" font-size="15">
+    separate executable
+  </text>
+  <text x="884" y="270" fill="#f8fafc" font-family="Inter, Segoe UI, sans-serif" font-size="15">
+    OpenAI-compatible /v1
+  </text>
+  <text x="884" y="300" fill="#f8fafc" font-family="Inter, Segoe UI, sans-serif" font-size="15">
+    random free port
+  </text>
+
+  <line x1="360" y1="260" x2="446" y2="260" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="770" y1="260" x2="856" y2="260" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="60" y="420" width="1080" height="230" rx="18" fill="#0b1220" stroke="#1f2937"/>
+  <text x="88" y="456" fill="#e2e8f0" font-family="Inter, Segoe UI, sans-serif" font-size="20" font-weight="700">
+    Verified flow
+  </text>
+  <text x="88" y="492" fill="#94a3b8" font-family="monospace" font-size="14">
+    JanasServer.start()
+  </text>
+  <text x="88" y="520" fill="#e2e8f0" font-family="monospace" font-size="14">
+    → http://127.0.0.1:&lt;random-port&gt;/v1
+  </text>
+  <text x="88" y="552" fill="#94a3b8" font-family="monospace" font-size="14">
+    POST /v1/chat/completions
+  </text>
+  <text x="88" y="580" fill="#e2e8f0" font-family="monospace" font-size="14">
+    → architectural brief → system prompt
+  </text>
+  <text x="88" y="612" fill="#94a3b8" font-family="monospace" font-size="14">
+    session_shutdown
+  </text>
+  <text x="88" y="640" fill="#e2e8f0" font-family="monospace" font-size="14">
+    → JanasServer.stop()
+  </text>
+
+  <rect x="860" y="440" width="240" height="70" rx="12" fill="url(#uh)" opacity="0.16"/>
+  <text x="884" y="472" fill="#bae6fd" font-family="Inter, Segoe UI, sans-serif" font-size="16" font-weight="700">
+    MIT core
+  </text>
+  <text x="884" y="496" fill="#bae6fd" font-family="Inter, Segoe UI, sans-serif" font-size="14">
+    GPL Janas stays external
+  </text>
+</svg>

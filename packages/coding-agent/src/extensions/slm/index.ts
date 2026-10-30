@@ -7,7 +7,7 @@
  */
 import { getSettingsPath } from "../../config.ts";
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
-import { getSlmProviderInfo, listSlmModels, setSlmSettings } from "./slm-config.ts";
+import { getSlmProviderInfo, listSlmModels, parseSlmSetArgs, setSlmSettings } from "./slm-config.ts";
 
 export default function slmExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("slm-providers", {
@@ -31,15 +31,20 @@ export default function slmExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("slm-set", {
-		description: "Set the U-Harness SLM model (optionally pass a model id)",
+		description: "Set the U-Harness SLM model, or `<provider> <model>` such as `janas qwen3.5-2b`",
 		handler: async (args, ctx) => {
 			const requested = args.trim();
 			try {
+				const parsed = parseSlmSetArgs(requested);
 				const model =
-					requested || (await ctx.ui.select("SLM model", await listSlmModels(pi.getSettings().uHarness)));
+					parsed?.model ?? (await ctx.ui.select("SLM model", await listSlmModels(pi.getSettings().uHarness)));
 				if (!model) return;
-				setSlmSettings(getSettingsPath(), { model });
-				ctx.ui.notify(`SLM model set to ${model}`);
+				setSlmSettings(getSettingsPath(), {
+					model,
+					...(parsed?.provider ? { provider: parsed.provider } : {}),
+					...(parsed?.executablePath ? { executablePath: parsed.executablePath } : {}),
+				});
+				ctx.ui.notify(`SLM model set to ${model}${parsed?.provider ? ` (${parsed.provider})` : ""}`);
 			} catch (error) {
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 			}
