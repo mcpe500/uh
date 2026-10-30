@@ -49,7 +49,9 @@ export default function freeUhProvider(pi: ExtensionAPI): void {
 			const key =
 				credential && "access" in credential && typeof credential.access === "string"
 					? credential.access
-					: process.env[API_KEY_ENV];
+					: credential && "key" in credential && typeof credential.key === "string"
+						? credential.key
+						: process.env[API_KEY_ENV];
 			if (!context.allowNetwork || !key) return [];
 			const response = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
 				headers: { Authorization: `Bearer ${key}` },
