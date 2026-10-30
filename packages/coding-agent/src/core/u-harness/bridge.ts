@@ -55,9 +55,13 @@ export class UHarnessBridge {
 	 * Runs the inbound compression stage only and returns the architectural brief.
 	 * This is the runtime entry point used when the cloud reasoner is the normal agent model.
 	 */
-	async compressInbound(task: string, files: RepoFile[]): Promise<string> {
+	async compressInbound(
+		task: string,
+		files: RepoFile[],
+		callSlm: (prompt: string) => Promise<string> = (prompt) => this.callSlmDefault(prompt),
+	): Promise<string> {
 		const prompt = buildInboundCompressorPrompt(task, files);
-		const raw = await this.callSlmDefault(prompt);
+		const raw = await callSlm(prompt);
 		return parseArchitecturalBrief(raw).raw;
 	}
 

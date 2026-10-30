@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="640" viewBox="0 0 1100 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1120"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+  </defs>
+  <rect width="1100" height="640" fill="url(#bg)"/>
+  <rect x="50" y="50" width="1000" height="520" rx="20" fill="#020617" stroke="#1f2937"/>
+  <rect x="50" y="50" width="1000" height="54" rx="20" fill="#111827"/>
+  <circle cx="86" cy="77" r="7" fill="#f87171"/>
+  <circle cx="112" cy="77" r="7" fill="#fbbf24"/>
+  <circle cx="138" cy="77" r="7" fill="#34d399"/>
+  <text x="170" y="83" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    packages/coding-agent — Janas SLM integration proof
+  </text>
+
+  <text x="86" y="150" fill="#7dd3fc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">
+    $ npm run check
+  </text>
+  <text x="86" y="180" fill="#a7f3d0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    Checked 1986 files in 74s. No fixes applied.
+  </text>
+  <text x="86" y="204" fill="#a7f3d0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    install-lock is up to date · browser smoke passed
+  </text>
+
+  <text x="86" y="256" fill="#7dd3fc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">
+    $ vitest --run test/janas-slm.test.ts
+  </text>
+  <text x="86" y="286" fill="#a7f3d0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    ✓ parses provider-aware /slm-set arguments
+  </text>
+  <text x="86" y="314" fill="#a7f3d0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    ✓ lets the caller provide the SLM call
+  </text>
+  <text x="86" y="342" fill="#a7f3d0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    ✓ starts and stops an external OpenAI-compatible Janas process
+  </text>
+  <text x="86" y="370" fill="#a7f3d0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    Test Files 1 passed · Tests 3 passed
+  </text>
+
+  <text x="86" y="422" fill="#7dd3fc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">
+    $ /slm-set janas qwen3.5-2b
+  </text>
+  <text x="86" y="452" fill="#a7f3d0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    SLM model set to qwen3.5-2b (janas)
+  </text>
+
+  <text x="86" y="502" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">
+    Runtime path:
+  </text>
+  <text x="86" y="528" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">
+    JanasServer.start() → http://127.0.0.1:&lt;random-port&gt;/v1 → POST /v1/chat/completions
+  </text>
+  <text x="86" y="554" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">
+    session_shutdown → JanasServer.stop()
+  </text>
+</svg>

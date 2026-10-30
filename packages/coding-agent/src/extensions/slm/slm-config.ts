@@ -16,11 +16,13 @@ export interface SlmProviderInfo {
 }
 
 export interface SlmSettingsPatch {
+	provider?: string;
 	baseUrl?: string;
 	model?: string;
 	apiKey?: string;
 	temperature?: number;
 	maxTokens?: number;
+	executablePath?: string;
 }
 
 export function getSlmProviderInfo(settings: UHarnessSettings | undefined): SlmProviderInfo {
@@ -29,6 +31,31 @@ export function getSlmProviderInfo(settings: UHarnessSettings | undefined): SlmP
 		baseUrl: settings?.slm?.baseUrl ?? "http://localhost:8000/v1",
 		model: settings?.slm?.model ?? "Qwen/Qwen2.5-Coder-1.5B-Instruct",
 	};
+}
+
+export interface ParsedSlmSetArgs {
+	provider?: string;
+	model?: string;
+	executablePath?: string;
+}
+
+/**
+ * Parse `/slm-set` arguments.
+ * Supported forms: `<model>`, `<provider> <model>`, or
+ * `<provider> <model> --executable <path>`.
+ */
+export function parseSlmSetArgs(input: string): ParsedSlmSetArgs | undefined {
+	const tokens = input.trim().split(/\s+/u).filter(Boolean);
+	if (tokens.length === 0) return undefined;
+	const executableFlagIndex = tokens.indexOf("--executable");
+	const executablePath = executableFlagIndex >= 0 ? tokens[executableFlagIndex + 1] : undefined;
+	const positional = tokens.filter(
+		(token, index) => token !== "--executable" && (executableFlagIndex < 0 || index !== executableFlagIndex + 1),
+	);
+	if (positional.length === 0) return undefined;
+	if (positional.length === 1) return { model: positional[0] };
+	const [provider, model] = positional;
+	return { provider, model, ...(executablePath ? { executablePath } : {}) };
 }
 
 function authHeaders(apiKey: string | undefined): Record<string, string> {
