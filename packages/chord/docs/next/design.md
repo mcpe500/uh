@@ -89,7 +89,8 @@ worker worker worker      addressable by a typed address, started on demand
 | worker | yes, many | stamped by the parent | started on demand by the app |
 
 Clients serve only `local` types (they are not addressable): a host without a principal or without an address refuses
-to serve a remote type (`load` throws; a remote object is owned by a principal of the host serving it, owner,
+to serve a remote type (a declaration error: `load` leaves that plugin out and reports it, a reload keeps it on its
+old code; a remote object is owned by a principal of the host serving it, owner,
 2026-10-24; and placed by its host address, owner, 2026-10-29). No client providers for now (owner,
 2026-10-28): client-side capabilities (a camera, WebMCP tools) go through an owner's requests that clients answer
 (section 20, the Questions service). A client's local
@@ -225,8 +226,10 @@ server.route(Session, {
 
 Do not pass `context.abortSignal` to `fork`: `host.close` aborts it, which kills the worker and makes Node emit an
 `error` event that crashes an app without a handler. Chord closes the link at `host.close`; the worker exits when its
-parent link closes. `resolve` returns the link before the worker has loaded (the worker connects first, W6): a
-`resolve` waiting for the worker's `load` while the worker's facets hold server types would deadlock.
+parent link closes. `resolve` returns the link before the worker has loaded (the worker connects first, W6): made
+later, the link would leave the worker's `hello` unread and the heartbeat would close it during a long `load` (slice
+10's spec review; the deadlock once feared here does not happen: 7a's barrier ends its first pass on a wait on another
+host). The workers component (§23) does this.
 
 | Call | Meaning |
 | --- | --- |
@@ -235,7 +238,7 @@ parent link closes. `resolve` returns the link before the worker has loaded (the
 | `reload([{ name, facet }], context)` | the complete new plugin set after `load` (a facet passed as the same object is an unchanged plugin): staging, then one commit, then every object of a changed or removed plugin takes its fate; resolves with a report (a plugin whose new code fails keeps its old code, listed in `failed`); one at a time (section 21, slice 7b) |
 | `connect(link, { principal, trusted?, codec? }, context)` | the link to the parent, at most one open; once it closed (a drop), `connect` takes the next, and every remote reference over the parent is held again on it. `principal` = who the parent is |
 | `accept(link, { principal, trusted?, codec? }, context)` | a link from a child; holds and calls on it act as `principal` |
-| `route(Kind, { authorize, resolve }, context)` | how to reach hosts of a kind (below); called before `load`, once per kind; work arriving on its links runs under `context` |
+| `route(Kind, { authorize, resolve }, context)` | how to reach hosts of a kind (below); called before `load`, once per kind; work arriving on its links runs under `context`; returns a `RouteHandle`: `retry(address)` resolves the address again (D10b), `suspend(address)` stops resolving it until `retry` (R1) |
 | `get(Type, params, context, { readyTimeout? })` | a reference once its object is live, waiting through `loading`, `failed { transient }` and `failed { waiting }` up to its `readyTimeout` (section 7) |
 | `hold(Type, params, context, { readyTimeout? })` | a reference at once that follows its object until released (section 7) |
 | `close(context)` | closes the links (children, routes, then the parent), then ends every object at once and tears them down, the last to go live first (reason `close`); rejects with an `AggregateError` of the native closes that threw |
@@ -303,12 +306,16 @@ host.route(Session, {
   aborted only when the host closes; a link it returns after that is closed at once. A `resolve` whose holds were all
   released meanwhile finishes and its link is kept (a worker start that produced a link finishes even if its first
   requester left). A `resolve` that never settles is the app's (it bounds its own `fork`); getters still time out.
-- **Failure and re-resolve:** a rejected `resolve` (reported `resolve_failed`), a returned link already closed, or the
-  address's link closing while holds over it exist, starts the **per-address backoff** (1 s doubling to 60 s; a map
-  keyed by address, separate from objects' identity backoff). Meanwhile the holds are `loading`. Only a link that
-  completed its handshake resets the backoff. Without holds for the address nothing is resolved again, so passive
-  viewers recover without a user action while they hold.
-- Chord never closes a route link itself except at `host.close`; stopping idle workers is the app's (`host.activity`).
+- **Failure and re-resolve** (slice 10 R2, owner, 2026-10-30; replaces the per-address backoff): a route has no
+  timer. A rejected `resolve` (reported `resolve_failed`) or a returned link already closed fails the route's holders
+  with its error (`failed`, not an endless `loading`); the route resolves again only for a new hold, on
+  `RouteHandle.retry(address)`, or once after the address's link dropped while holds exist (a drop of a healthy link
+  recovers at once; whether a crashed worker comes back is the `resolve`'s answer). `RouteHandle.suspend(address)`
+  (R1) stops resolving an address (its holders stay `loading`) until `retry`. A network route that wants to reconnect
+  keeps its own policy in its `resolve`. The workers component answers a failed address's `resolve` with its stored
+  failure at once: workers never restart by themselves (§23).
+- Chord closes a route link itself only at `host.close`, on the heartbeat and on a protocol error; stopping idle
+  workers is the app's (`host.activity`, the workers component, §23).
 - Work arriving on a route's links runs under the context given to `host.route(Kind, options, context)` (slice 4b).
 
 ### Links
@@ -384,8 +391,10 @@ drops, folds or resets.
 - **Origins:** the relay gives each downstream origin (a downstream link, and the origin its messages carry when that
   link is itself a relay's) a number, one counter per host, never reused; 0 is a host's own work. Every message
   upstream for that origin carries `origin`; the provider keys holds, calls, windows and acks by (link, origin, id), and
-  its answers carry the origin back. `origin` is honoured on every link (a worker may relay a child's hold to its
-  parent); principals and incarnations stay parent-only.
+  its answers carry the origin back. `origin` is read only on parent and route links, where a relay's messages
+  arrive (a worker may relay a child's hold to its parent); on a child link it is a protocol error (decision "Origins
+  only from relays", 2026-10-31); a per-origin record goes once it has no holds, calls or messages in flight;
+  principals and incarnations stay parent-only.
 - **Ids are not renumbered:** an upstream hold has the downstream hold's id under the origin's number; calls the same.
   Two tabs (two holds) of one principal are two upstream holds, each with its own encoders (R1).
 - **Nothing is parsed:** the relay routes by the hold's address and authorizes it; params, arguments, results,
@@ -714,7 +723,8 @@ host.serve(Notes, ({ session }, principal, self) =>
   the watches before natives open, so a failed open still has them). Every trigger works like `ref.retry()`: the
   backoff window is skipped, an attempt starts now, holders are told `loading`. `retryOn` sources must live independently of the
   attempt (registry values); a reference's member is a type error. A facet cannot fail
-  after `load`: its setup only declares (a throwing setup rejects `load`, slice 2; owner, 2026-10-26).
+  after `load`: its setup only declares (a throwing setup leaves its plugin out of `load`, reported in `load`'s
+  `failed`; decision "Per plugin at startup and reload"; owner, 2026-10-26, 2026-10-30).
 
 ### The factory principle
 
@@ -1814,7 +1824,9 @@ it does not wait for objects to go live); a plugin whose new code fails keeps it
 report's `failed` (per plugin, below).
 Reloads run one after another per host; before `load` resolved it throws, after `close` it rejects `released/closed`;
 `context` bounds it (decision 4: no install watchdog): its abort before the commit rejects `aborted` and changes
-nothing, after the commit it only ends the wait.
+nothing, after the commit it only ends the wait: it rejects `aborted` with `details.committed`, a `CommittedReload`
+`{ added, changed, removed, failed }` naming what the commit applied (the plugins component adopts it, so a later
+reload never passes a committed plugin's old facet; owner, 2026-10-30).
 
 ```ts
 type ReloadReport = {
@@ -1827,9 +1839,11 @@ type ReloadReport = {
 ```
 
 ```
-1. load      new bundles (the app's or loader's: a facet arrives evaluated); an import or syntax error rejects
-2. staging   every setup into a staged table, and every affected object's new factory against a recording `self`
-             (declarations only, nothing activated, bound or opened); any throw rejects
+1. load      new bundles (the app's or loader's: a facet arrives evaluated); a plugin whose build or evaluation
+             fails keeps its loaded facet (`reload(facets, context, { failed })`)
+2. staging   every new setup into a staged table, and every affected object's new factory against a recording
+             `self` (declarations only, nothing activated, bound or opened); a plugin whose new code throws keeps its
+             old code, staging runs again without it, then the closure rule (below)
 3. commit    one batch: the host switches to the new code atomically, a publication (7a)
 4. after     each object takes its fate (below)
 ```
@@ -1848,8 +1862,10 @@ type ReloadReport = {
   closure rule to it as to a plugin whose staging failed. What no rule detects: a consumer relying on new behaviour of a kept provider whose contract did not
   change (as in a rollout across hosts). Runtime states (registry conflicts, failed opens, migrations) stay per object
   after the commit (`onError` as always).
-- **Staging** runs every facet's setup into a staged table beside the live one (types with their factory, `linger` and
-  provider, `bindProvider(contract, options.accepts)`; registry providers; facet contributions by plugin), then, for
+- **Staging** runs every new setup (each plugin into its own table, merged; an unchanged or kept plugin's loaded
+  entries are reused, its setup not run again) into a staged table beside the live one (types with their factory,
+  `linger` and provider, `bindProvider(contract, options.accepts)`; registry providers; facet contributions by
+  plugin), then, for
   every live, activating, parked or failed object of a changed or removed plugin whose type is still served, its new
   factory with the object's params (and principal) against a recording `self`: it records what the factory opens,
   the documents, tables and jobs it declares with their versions, its contributions and requests, runs the checks an
@@ -1899,7 +1915,9 @@ type ReloadReport = {
   in their own process, model runtimes, sandboxes and the search index rebuild in milliseconds); reloading the plugin
   that owns SSH connections or the relay socket hurts.
 - **No factory trial, no migrate dry run, no consumer contract check during staging:** staging records declarations;
-  incompatible consumers wait at bind (`failed { waiting }`, `contract_mismatch`).
+  incompatible consumers wait at bind (`failed { waiting }`, `contract_mismatch`). The one exception is the closure
+  rule above: when a plugin of the reload failed, a changed plugin's recorded requests are checked as a bind would
+  check them, to keep it old.
 - **Start barrier** (host start and first load; dependency model §6, decision (a), slice 7a): `load` runs the facets'
   setups (the core facet with its start data among them) and **publishes** them in one batch (types served,
   registries served and composed once, contributions in their tables); requests that waited for the publication are
@@ -1920,8 +1938,8 @@ type ReloadReport = {
 ### Rollout across hosts
 
 - **The rollout is the app's** (decision "Slice 7b's open points" (3)): it calls `host.reload` on each host in order,
-  server, then workers, then clients; Chord guarantees per host (staging, commit, rollback). The app kit's
-  dev component (slice 7c) is such an app. An install never waits for activations (a reverse-order rollout would
+  server, then workers, then clients; Chord guarantees per host (staging, commit, a failing plugin kept on its old
+  code). The plugins component's `rollout` (slice 7c) runs such steps. An install never waits for activations (a reverse-order rollout would
   deadlock).
 - **Each host knows only its own install** (model §5): until its reload commits (while the app bundles, before
   `host.reload`), a hold that does not fit its running code is answered `failed { waiting, version }` and the commit
@@ -1945,7 +1963,7 @@ type ReloadReport = {
   duplicate name). Dependencies between plugins resolve by contract name at runtime; names are prefixed
   (`<plugin>.<name>`; tools `<plugin>_<name>`).
 - **Loader D:** one esbuild script per facet (its own files, copied files of other plugins, its npm `dependencies`
-  inlined; host packages, `chord.external` packages and Node builtins external, passed in at evaluation); evaluated with
+  inlined; host packages, `chord.external` packages and Node builtins external, passed in at evaluation); each facet kind is defined once, `kinds: { <kind>: { platform: "node" | "browser", hostPackages } }` (slice 11); evaluated with
   `vm.Script` under a stable filename per (plugin, kind, digest); no module map: old generations are reclaimed by the
   GC; V8's compilation cache turned off when the component is created. `pluginFile(path)` resolves a file of the
   calling facet's own plugin. A plugin's dependencies are installed into its directory (`installDependencies`, as
@@ -2089,46 +2107,76 @@ validation, no clone of snapshots or ops.
 
 ## 23. Optional components
 
-Deferred: the HTTP and channel components and middleware phases are built after the kernel fixes and a first real
-proof (harness, one tool with an approval pause, a code mode reload); the playground's web shell serves its pages
-with plain app code until then. The design below stays the target.
+The app kit's Node components (slice 10, `slice-10.md`, decision "Slice 10's points"): `chord/next/http` and
+`chord/next/workers` in `src/next-node/`; the web page host and the TUI are slice 11. Each is ordinary code on Chord's
+public API; nothing in the kernel depends on them.
 
 ### HTTP (`@earendil-works/chord/next/http`)
 
-A route is `(req, ctx) => Promise<HttpResponse>`. `req` is a plain request summary (method, path params, query,
-principal, provenance such as local or relayed, selected headers; parsed and capped JSON bodies; uploads handed over in
-chunks); `ctx.principal` is the request's principal (from the request resolvers), so `ctx.get(Notes, …)` gives that
-principal's view. A route returns a description:
+`httpServer(host, { listen, allowedHosts?, authenticate, headers?, links?, closeTimeout?, onError }, ctx)` listens
+first; requests and upgrades wait only for the router's publication (`host.registry(Http)`, resolved once), never for
+the start barrier. `Host` (loopback or allowed: the option plus contributed `hosts`) and an upgrade's `Origin` are
+checked before anything else (R4); connections through a host no longer allowed close. `authenticate(request, ctx) => P | undefined` is the app's one hook (D3: who a
+request is, and which credential wins, is app policy; no Chord registry of resolvers); `headers` are added to every
+response, also those no route makes; `links.path` (`/chord`) upgrades to `host.accept(webSocketLink(ws), { principal,
+limits })`, a socket without a principal refused. `ws` is an optional peer dependency (D7).
+
+The registry `Http` (`"chord.http"`) is defined by the component and served by its own facet (`http.facet`, loaded
+with the plugins, D1); plugins contribute `routes`, `wraps` and `sockets`. A route is `(req, ctx) =>
+Promise<HttpResponse>`, run in a `host.root` scope with the request's principal (`ctx.principal`) and a signal aborted
+when the client disconnects; `req` has `method`, `path`, `params`, `query`, `headers`, `origin`, `json(limit?)` and
+`body(limit?)` (D4: nothing read until asked; 1 MiB by default; past the limit 413). Patterns (D8): exact segments,
+`:name`, a trailing `/*`; the most specific match wins, segment by segment from the left; one pattern from two
+contributions is a reported conflict, the first by plugin name wins; `HEAD` falls back to `GET`. A request uses the
+router as it was when it started.
 
 ```ts
-| { kind: "json"; value } | { kind: "page"; title; body }
-| { kind: "bytes"; name; mime; size; read(offset, length) }
-| { kind: "redirect"; to } | { kind: "error"; status }
+type HttpResponse = { readonly headers?: Readonly<Record<string, string>> } & (           // D5
+  | { kind: "json"; value: JsonValue; status?: number } | { kind: "html"; body: string; status?: number }
+  | { kind: "bytes"; mime: string; size?: number; read(offset, length, ctx): Promise<Uint8Array>; download?: string; ranges?: boolean }   // no size: chunked (R6)
+  | { kind: "redirect"; to: string; status?: 302 | 303 | 307 } | { kind: "error"; status: number; message?: string });
 ```
 
-The component does ranges (206/416), HEAD, download headers (safe filename, `nosniff`, CSP, caching), streaming,
-abort on disconnect and the CSP nonce once, instead of every plugin. Contributions hold `routes` (composed with
-`keyed`; a duplicate pattern is a reported conflict, the first by plugin name wins) and `wraps`:
+The component does ranges (206/416), `HEAD`, safe download headers, 64 KiB reads with backpressure stopped on
+disconnect, and a 500 without the message for a throwing route; `fileResponse(path, options)` serves a file.
 
 ```ts
 type Wrap = {
   name: string;
-  phase: "observe" | "headers" | "transform";   // owner-defined phases, outermost first
+  phase: "observe" | "headers" | "transform";   // the component's phases, outermost first
   scope?: "own" | "all";                         // default "own": only this contributor's routes
   route?: string;                                // only this route; a missing route is a reported conflict
   wrap: (req, next, ctx) => Promise<HttpResponse>;
 };
 ```
 
-Within a phase, wraps run in contributor order (no numeric priorities: plugins have no single registration order, as
-Express or Hono apps do; Fastify's lifecycle phases and encapsulation are the model). Wraps may add a security boundary
-on top of an owner's checks, never instead of them. A request uses the router as it was when it started. Request
-resolvers (who sent a request: cookie, loopback, relay) are hooks over the summary.
+Wraps (D2) run within a phase in contributor order (no numeric priorities: plugins have no single registration
+order; Fastify's lifecycle phases and encapsulation are the model). Wraps may add a security boundary on top of a
+route's checks, never instead of them. `sockets` (D6): `{ "/terminal": (socket, req, ctx) => … }`, a `ws` WebSocket
+after the origin check and `authenticate` (no principal: 403 before plugin code), for a plugin's own protocol; wraps do
+not apply; closed (1012) when the contribution that handed them out leaves the table (§17).
+
+### Workers (`@earendil-works/chord/next/workers`)
+
+`createWorkers(host, Kind, { kind, entry, start, plugins, lock, idleMs?, onOutput?, onError }, ctx)` routes `Kind`
+itself (a forked worker per address over IPC, the link made at the fork, a start message with the app's start data and
+the worker kind's complete scripts; the 60 s start timer covers fork, lock and connect only, Q4), with a `state`
+watchable per address, `stop`, `retry` and `close`; `workerMain(fn, { hostPackages, redact, onError })` is the child's
+side. One live worker per address (a kernel lock the child takes, waiting for a draining old worker without polling).
+Keep-alive (D9, R3, Q5): the child reports when `host.activity`'s references, jobs and lingering objects and the app's
+`busy` counts flip between all zero and not (local calls do not count; the first state with `ready`); the server stops
+a worker idle (all zero) for `idleMs` (5 min). Workers start on demand and never restart by themselves (R2): a crash,
+a `fatal`, a link lost while its child lives (killed after the grace) or a failed start leaves the address failed with
+its error; its holders see `failed { waiting }` and stay on the path (Q1); `workers.retry(address)` or a rollout
+reaching workers clears it and starts the held ones (Q2). `workers.stop` suspends the address while it has holders
+(R1, Q3). Workers never build (D11): the server's plugins component builds every plugin; workers evaluate shipped
+complete sets (`createPluginRuntime`, no esbuild), and `workers.step(name)` ships a rollout's set to every worker (D12:
+one result per host; a worker stopped cleanly during it is listed `stopped`).
 
 ### Channels
 
-WebSocket byte channels (`send`, `onData`, `close`) for terminals, separate from object links, with their own flow
-control (acknowledged windows).
+WebSocket byte channels with acknowledged windows, separate from object links, wait for a second user after the
+terminals (slice 10 D6); they would be built on top of plugin sockets.
 
 ### Chunked transfers
 

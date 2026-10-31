@@ -880,3 +880,37 @@ the gap follows the shape of the text decoder's `fromFields`, not what runs: the
 (19.0-19.2 µs), the one change in it that matters is the never-executed `T` (retry) case, and writing that case with an
 object spread again (`...(f.length >= 2 ? { hops } : …)`) restores HEAD's 19.1 µs while other edits of the same size do
 not. With text measured first the gap is 22.4-22.5 → 23.0-23.3 µs (+2-3%). V8 code generation, recorded as noise.
+
+## Slice 7c: plugins (2026-10-30)
+
+**The plugins component** (`test/next/bench/plugins.ts`, new): 20 plugins, one worker facet each (a store object over a
+document, a derive, a method, a helper module and a copied contract; 80.9 KiB of scripts in all), Node 24.4.1. Medians
+of seven runs; three runs pinned to CPU 8, one unpinned:
+
+| Measurement | CPU 8 | unpinned (32 CPUs) |
+| --- | --- | --- |
+| cold build of the 20 worker facets (one esbuild build each, all at once) | 240.1-240.7 ms | 26.4 ms |
+| rebuild of one facet after an edit | 13.1-13.3 ms | 11.0 ms |
+| evaluation of one facet (`vm.Script`, its source map registered) | 0.16-0.27 ms | 0.09 ms |
+| reload of one plugin on a host (evaluation and `host.reload`, a pure swap) | 0.44-0.45 ms | 0.44 ms |
+| heap after 100 reloads of one plugin, against after a warm-up | +230-235 KiB | +229 KiB |
+
+The heap does not grow per reload: 2,000, 4,000 and 8,000 reloads leave +897, +1,186 and +1,432 KiB (sublinear); the
+same evaluations through plain `vm.Script` with V8's compilation cache off leave +420 KiB at 8,000 against +465 KiB
+through `evaluateFacet` (V8's own per-script bookkeeping), and the kernel's reloads alone wander between +200 and
++600 KiB at any count. Old facets and their closures are collected (the GC test: 200 reloads, every facet but the last
+two collected, the heap within 2 MiB of the warm-up).
+
+Fix round 1 (inline source maps without `sourcesContent`: positions only), CPU 8: the 20 scripts take 53.4 KiB (80.9
+KiB before); cold build 241.1 ms, rebuild 13.0 ms, evaluation 0.14 ms per facet, a reload 0.39 ms, heap after 100
+reloads +238 KiB.
+
+**Kernel hot paths** (per plugin at load and reload changes only staging), HEAD `18a155e2f` → build at paths of equal
+length, CPU 6, three alternating runs. `calls.ts`: local call 2.69-2.71 → 2.71-2.75 µs (6,660 B both), watched
+derive commit 10.34-10.36 → 10.43-10.49 µs (14,899 → 14,901 B), activation churn 58.93-59.58 → 59.44-59.73 µs
+(41,452-41,470 → 41,470 B). `links.ts` binary commit to frame (median / p90): append 0.035-0.036 / 0.058-0.059 →
+0.034-0.036 / 0.058-0.060 ms, changed field 0.027-0.028 / 0.031-0.033 → 0.027-0.028 / 0.031-0.033 ms, removal 0.022 /
+0.026-0.028 → 0.022 / 0.026-0.027 ms; with the young generation pinned alike within 2 µs; text alike; small call
+0.026-0.030 → 0.028-0.033 ms (pinned 0.030-0.035 → 0.030-0.032 ms); retained per hold equal (one binary hold 176.2 →
+170.1 KiB). `reload.ts`: swap of 50 / 1,000 objects 1.44-1.73 / 30.83-32.71 → 1.52-1.53 / 30.55-33.25 ms, restart
+1.01-1.05 / 15.54-16.87 → 0.95-0.99 / 15.90-16.02 ms until the reload resolves.

@@ -247,7 +247,21 @@ server.accept(webSocketLink(ws), { principal, limits: { part: 16 * MiB, decoded:
   resolves when each has its first outcome (decision (a)): live, failed by its own cause, parked with no blocker that
   is an object here still without its first outcome (a keyed pin still loading counts as here; a wait on another host
   or on a failed dependency ends the first pass), or ended (`close` settles a waiting `load`); later retries never
-  hold it. A setup that throws rejects it with that error and closes the host as `close` does, its links included.
+  hold it. Per plugin (decision "Per plugin at startup and reload"): a plugin whose setup throws or is refused at
+  declaration (an invalid or repeated name, a type or registry an earlier plugin serves, a remote type here without
+  principal or address, `checkAccepts`) is left out; `load` resolves with `{ failed: [{ plugin, error }] }` and never
+  closes the host; its consumers wait `failed { waiting }`.
+- `host.reload([{ name, facet }], ctx)` (slice 7b, per plugin since 7c): the complete new plugin set; staging runs the
+  new code per plugin (unchanged and failed plugins keep their loaded entries, their setups not run again). A plugin
+  whose new code fails (its setup, a factory against the recording `self`, a declaration error, a name another plugin
+  serves) keeps its old code (an added one is left out) and staging runs again without it; then a changed plugin whose
+  recorded requests would not bind because of such a plugin (its old code serving the name, or nobody serving it)
+  keeps its old code too (the closure rule), to a fixpoint; a request is checked as a bind checks it, the provider's
+  host address included. `reload(facets, ctx, { failed })` names plugins the caller passes as their loaded facet
+  because their new code failed before (a build, an evaluation: the plugins component): the same for the closure rule.
+  The report lists them all in `failed`; the rest commits. `ctx`'s abort before the commit rejects `aborted` and
+  changes nothing; after it, it ends only the wait for the report: `aborted` with `details.committed`
+  (`CommittedReload`: `added`, `changed`, `removed`, `failed` by plugin name), the commit standing.
 - `host.hold(Type, params, ctx, { readyTimeout? })`: a reference at once (`Held<C>`: its `variant` is `undefined` until
   its first binding), which follows its object until released and never rejects: `loading` before the publication,
   while the object activates, retries or is parked on dependencies under way, while there is no parent link or it is
