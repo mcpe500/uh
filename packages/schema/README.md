@@ -134,22 +134,22 @@ Node 24.4.1 on one core of an i9-13900, against TypeBox 1.3.27, @cfworker/json-s
 
 | check, valid value | pi-schema | TypeBox | cfworker | omptype |
 |---|---:|---:|---:|---:|
-| nested object with tagged unions | 535 ns | 464 ns | 43 µs | 713 ns |
-| union of 5 messages | 96 ns | 94 ns | 10 µs | 94 ns |
-| tool schema (read) | 34 ns | 9 ns | 2.0 µs | 8 ns |
-| MCP tool schema with `$ref` | 207 ns | 88 ns | 13 µs | 1.7 µs |
-| recursive `$ref` schema | 1.1 µs | 1.2 µs | 41 µs | 7.4 µs |
+| nested object with tagged unions | 409 ns | 474 ns | 44 µs | 689 ns |
+| union of 5 messages | 89 ns | 95 ns | 10 µs | 93 ns |
+| tool schema (read) | 31 ns | 9 ns | 1.9 µs | 9 ns |
+| MCP tool schema with `$ref` | 162 ns | 89 ns | 13 µs | 1.8 µs |
+| recursive `$ref` schema | 753 ns | 1.2 µs | 41 µs | 7.4 µs |
 
 | same, without eval (strict CSP) | pi-schema | TypeBox | cfworker | omptype |
 |---|---:|---:|---:|---:|
-| nested object with tagged unions | 527 ns | 42 µs | 44 µs | 2.7 µs |
-| MCP tool schema with `$ref` | 209 ns | 38 µs | 13 µs | 2.1 µs |
-| recursive `$ref` schema | 1.1 µs | 134 µs | 43 µs | 8.9 µs |
+| nested object with tagged unions | 407 ns | 42 µs | 43 µs | 2.6 µs |
+| MCP tool schema with `$ref` | 162 ns | 36 µs | 12 µs | 2.0 µs |
+| recursive `$ref` schema | 750 ns | 124 µs | 41 µs | 9.0 µs |
 
 | cost | pi-schema | TypeBox | cfworker | omptype |
 |---|---:|---:|---:|---:|
-| compile a new schema | 43 µs | 210 µs | 23 µs | 19 µs + 114 µs on its first check |
-| memory, 3,200 distinct schemas | 7.9 MB | 54.7 MB | 7.6 MB | 20.0 MB |
+| compile a new schema | 21 µs | 203 µs | 20 µs | 26 µs + 106 µs on its first check |
+| memory, 3,200 distinct schemas | 7.1 MB | 54.7 MB | 7.6 MB | 20.0 MB |
 | bundle, minified + gzip | 8.5 KB | 35.2 KB | 5.8 KB | 38.8 KB |
 
 Reproduce with `npm run bench` in `packages/schema` (about 5 minutes). It runs every library through its fastest
@@ -167,7 +167,7 @@ boolean path and keeps the object each returns. The scripts are in `test/bench/`
 Where code generation is unavailable, TypeBox falls back to its interpreter, and omptype throws `EvalError` once per
 schema, then validates through its interpreter.
 
-Flat objects of simple types check in 15–90 ns, against 8–15 ns for TypeBox. Without code generation, reading a
+Flat objects of simple types check in 13–80 ns, against 7–15 ns for TypeBox. Without code generation, reading a
 property whose name comes from a list costs a few nanoseconds.
 
 ## Development
