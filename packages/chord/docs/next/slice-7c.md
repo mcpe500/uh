@@ -157,5 +157,9 @@ of cross-plugin imports beyond §2's rule.
 - **GC:** 200 reloads of an evaluated plugin facet: old closures collected, heap flat after warm-up.
 - **End to end:** a server and a worker (memory links) loading plugin directories, a plugin edited on disk, built and
   rolled out (server, then worker), a holder seeing one frame; a broken edit kept old on both hosts and reported.
-- Example `35-plugins.ts`. Benchmark (`benchmarks.md`): cold build of a 20-plugin set, a rebuild of one facet,
+- Examples (owner, 2026-10-30: full coverage, each a folder `NN-topic/` with the hosts in `main.ts` and real plugin
+  directories under `plugins/`): `35-plugins` (load, edit, build, rollout), `36-plugin-failures` (per plugin at startup
+  and reload, the closure rule, an abort after the commit), `37-plugin-imports` (copied contracts, dependencies,
+  `chord.external`, host packages, `pluginFile`, the refusals), `38-watch-and-rollout` (the marks, plugins added and
+  removed, a stopped rollout), `39-browser-build` (CSS, assets, the built result as plain data). Benchmark (`benchmarks.md`): cold build of a 20-plugin set, a rebuild of one facet,
   evaluation per facet, heap after 100 reloads.
