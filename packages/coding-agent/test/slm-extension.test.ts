@@ -8,7 +8,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../src/core/event-bus.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
 import slmExtension from "../src/extensions/slm/index.ts";
-import { getSlmProviderInfo, listSlmModels, loadSlmCatalog, setSlmSettings } from "../src/extensions/slm/slm-config.ts";
+import {
+	getSlmProviderInfo,
+	listSlmModels,
+	loadSlmCatalog,
+	parseSlmModelEntry,
+	setSlmSettings,
+} from "../src/extensions/slm/slm-config.ts";
 
 const servers: Server[] = [];
 
@@ -126,5 +132,16 @@ describe("slm extension", () => {
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
 		}
+	});
+
+	it("splits catalog entries at the first slash", () => {
+		expect(parseSlmModelEntry("vllm/qwen2.5-coder:7b")).toEqual({ provider: "vllm", model: "qwen2.5-coder:7b" });
+		expect(parseSlmModelEntry("9router-local/glm/glm-5.3")).toEqual({
+			provider: "9router-local",
+			model: "glm/glm-5.3",
+		});
+		expect(parseSlmModelEntry("no-separator")).toBeUndefined();
+		expect(parseSlmModelEntry("/leading-slash")).toBeUndefined();
+		expect(parseSlmModelEntry("trailing/")).toBeUndefined();
 	});
 });
