@@ -2,13 +2,13 @@
  * Slash commands for managing the U-Harness SLM endpoint and model from inside pi.
  *
  * The commands are intentionally small: `/slm-providers` lists the providers in
- * models.json (the same snapshot `/models` reads), `/slm-models` lists that file's
- * models as `provider/id`, and `/slm-set` persists a model selection into the
- * global settings file.
+ * models.json (the same snapshot `/models` reads), `/slm-models` opens a selection
+ * menu over that file's models and persists the pick, and `/slm-set` sets a model
+ * selection directly.
  */
 import { getSettingsPath } from "../../config.ts";
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
-import { listSlmModels, loadSlmCatalog, parseSlmSetArgs, setSlmSettings } from "./slm-config.ts";
+import { listSlmModels, loadSlmCatalog, parseSlmModelEntry, parseSlmSetArgs, setSlmSettings } from "./slm-config.ts";
 
 export default function slmExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("slm-providers", {
@@ -34,12 +34,24 @@ export default function slmExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("slm-models", {
-		description: "List models from models.json as provider/id",
+		description: "Select an SLM model from models.json",
 		handler: async (_args, ctx) => {
 			try {
 				const catalog = await loadSlmCatalog();
-				const models = catalog.flatMap((entry) => entry.models.map((model) => `${entry.provider}/${model}`));
-				ctx.ui.notify(models.length > 0 ? models.join("\n") : "No models found in models.json");
+				const entries = catalog.flatMap((entry) => entry.models.map((model) => `${entry.provider}/${model}`));
+				if (entries.length === 0) {
+					ctx.ui.notify("No models found in models.json");
+					return;
+				}
+				const selected = await ctx.ui.select("SLM model", entries);
+				if (!selected) return;
+				const parsed = parseSlmModelEntry(selected);
+				if (!parsed) {
+					ctx.ui.notify(`Invalid model entry: ${selected}`, "error");
+					return;
+				}
+				setSlmSettings(getSettingsPath(), { provider: parsed.provider, model: parsed.model });
+				ctx.ui.notify(`SLM model set to ${parsed.model} (${parsed.provider})`);
 			} catch (error) {
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 			}

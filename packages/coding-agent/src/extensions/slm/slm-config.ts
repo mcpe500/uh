@@ -87,6 +87,17 @@ export function parseSlmSetArgs(input: string): ParsedSlmSetArgs | undefined {
 	return { provider, model, ...(executablePath ? { executablePath } : {}) };
 }
 
+/**
+ * Split a `provider/model` catalog entry at the first slash, so model ids that
+ * contain slashes (for example `glm/glm-5.3`) keep their full id. Returns
+ * undefined when the entry has no provider prefix.
+ */
+export function parseSlmModelEntry(entry: string): { provider: string; model: string } | undefined {
+	const separator = entry.indexOf("/");
+	if (separator <= 0 || separator === entry.length - 1) return undefined;
+	return { provider: entry.slice(0, separator), model: entry.slice(separator + 1) };
+}
+
 function authHeaders(apiKey: string | undefined): Record<string, string> {
 	if (!apiKey || apiKey === "none") return {};
 	return { Authorization: `Bearer ${apiKey}` };
