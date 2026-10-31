@@ -34,6 +34,8 @@
 			"@earendil-works/pi-codemode/portable": ["./packages/codemode/src/portable.ts"],
 			"@earendil-works/pi-codemode/source": ["./packages/codemode/src/source.ts"],
 			"@earendil-works/pi-codemode/worker": ["./packages/codemode/src/runtime/worker.ts"],
+			"@earendil-works/pi-schema": ["./packages/schema/src/index.ts"],
+			"@earendil-works/pi-schema/formats": ["./packages/schema/src/formats/index.ts"],
 			"@earendil-works/pi-mcp": ["./packages/mcp/src/index.ts"],
 			"@earendil-works/pi-mcp/oauth": ["./packages/mcp/src/oauth/index.ts"],
 			"@earendil-works/pi-mcp/testing": ["./packages/mcp/src/testing/index.ts"],
