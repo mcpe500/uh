@@ -240,6 +240,34 @@ UH_BIN_DIR="$HOME/.local/bin" \
 curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh | bash
 ```
 
+### Optional external Janas setup
+
+Install Janas separately first. The installer does not download, vendor, or
+bundle Janas. Then pass the executable path to opt in to external Janas setup:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh | \
+	bash -s -- \
+	--setup-janas \
+	--janas-executable "$HOME/.local/bin/janas-server" \
+	--janas-model "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+```
+
+On Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/mcpe500/uh/main/install.ps1 -OutFile "$env:TEMP\uh-install.ps1"
+& "$env:TEMP\uh-install.ps1" `
+	--setup-janas `
+	--janas-executable "$HOME\.local\bin\janas-server.exe" `
+	--janas-model "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+```
+
+The installer writes the Janas provider, model, and executable path to
+`~/.pi/agent/settings.json`. Uh starts the external Janas process when needed
+and stops it at session shutdown. For an existing install, run the same setup
+with `./update.sh` or `.\update.ps1`.
+
 Update:
 
 ```bash

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createWrapper, parseArgs, removeWrapper } from "./pi-install.mjs";
+import { configureJanas, createWrapper, parseArgs, removeWrapper } from "./pi-install.mjs";
 
 test("parseArgs defaults to install", () => {
 	const { mode, options } = parseArgs([]);
@@ -17,6 +17,20 @@ test("parseArgs accepts update options", () => {
 	assert.equal(mode, "update");
 	assert.equal(options.branch, "feat/test");
 	assert.equal(options.binDir, "/tmp/uh-bin");
+});
+
+test("parseArgs accepts Janas setup options", () => {
+	const { options } = parseArgs([
+		"install",
+		"--setup-janas",
+		"--janas-executable",
+		"/usr/local/bin/janas-server",
+		"--janas-model",
+		"test-model",
+	]);
+	assert.equal(options.setupJanas, true);
+	assert.equal(options.janasExecutable, "/usr/local/bin/janas-server");
+	assert.equal(options.janasModel, "test-model");
 });
 
 test("parseArgs rejects unknown modes", () => {
@@ -39,4 +53,48 @@ test("createWrapper creates and removes a Unix wrapper", () => {
 
 	removeWrapper({ binDir });
 	assert.equal(fs.existsSync(wrapper), false);
+});
+
+test("configureJanas writes external Janas settings without dropping other settings", () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "uh-janas-setup-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
+	fs.mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+	const settingsPath = path.join(process.env.PI_CODING_AGENT_DIR, "settings.json");
+	fs.writeFileSync(
+		settingsPath,
+		JSON.stringify({ theme: "dark", uHarness: { pipeline: "baseline", slm: { model: "old-model" } } }),
+	);
+
+	try {
+		configureJanas({
+			setupJanas: true,
+			janasExecutable: process.execPath,
+			janasModel: "test-model",
+		});
+
+		const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+		assert.equal(settings.theme, "dark");
+		assert.equal(settings.uHarness.pipeline, "u-shaped");
+		assert.equal(settings.uHarness.slm.provider, "janas");
+		assert.equal(settings.uHarness.slm.model, "test-model");
+		assert.equal(settings.uHarness.slm.executablePath, path.resolve(process.execPath));
+		assert.equal(settings.uHarness.slm.apiKey, "none");
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("configureJanas rejects a missing explicit executable", () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "uh-janas-missing-"));
+	assert.throws(
+		() =>
+			configureJanas({
+				setupJanas: true,
+				janasExecutable: path.join(root, "missing-janas-server"),
+				janasModel: "test-model",
+			}),
+		/Janas executable not found/u,
+	);
 });
