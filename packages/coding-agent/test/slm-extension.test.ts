@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../src/core/event-bus.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
 import slmExtension from "../src/extensions/slm/index.ts";
-import { getSlmProviderInfo, listSlmModels, setSlmSettings } from "../src/extensions/slm/slm-config.ts";
+import { getSlmProviderInfo, listSlmModels, loadSlmCatalog, setSlmSettings } from "../src/extensions/slm/slm-config.ts";
 
 const servers: Server[] = [];
 
@@ -75,6 +75,54 @@ describe("slm extension", () => {
 
 			const parsed = JSON.parse(readFileSync(settingsPath, "utf8"));
 			expect(parsed.uHarness.slm.model).toBe("slm-new");
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it("loads providers and models from models.json", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "slm-catalog-"));
+		const modelsJsonPath = join(directory, "models.json");
+		writeFileSync(
+			modelsJsonPath,
+			JSON.stringify({
+				providers: {
+					vllm: { baseUrl: "http://127.0.0.1:8000/v1", models: [{ id: "qwen2.5-coder:7b" }] },
+					"9router-local": {
+						name: "9Router",
+						baseUrl: "http://localhost:20128/v1",
+						models: [{ id: "opendata", reasoning: true }, { id: "9router-local-combo-2" }],
+					},
+				},
+			}),
+		);
+		try {
+			const catalog = await loadSlmCatalog(modelsJsonPath);
+			expect(catalog).toEqual([
+				{
+					provider: "vllm",
+					name: undefined,
+					baseUrl: "http://127.0.0.1:8000/v1",
+					models: ["qwen2.5-coder:7b"],
+				},
+				{
+					provider: "9router-local",
+					name: "9Router",
+					baseUrl: "http://localhost:20128/v1",
+					models: ["opendata", "9router-local-combo-2"],
+				},
+			]);
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it("throws when models.json fails to parse", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "slm-catalog-"));
+		const modelsJsonPath = join(directory, "models.json");
+		writeFileSync(modelsJsonPath, "{ not json");
+		try {
+			await expect(loadSlmCatalog(modelsJsonPath)).rejects.toThrow("Failed to parse models.json");
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
 		}

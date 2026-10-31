@@ -6,6 +6,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { getModelsPath } from "../../config.ts";
+import { ModelConfig } from "../../core/model-config.ts";
 import type { UHarnessSettings } from "../../core/settings-schema.ts";
 import { stripBom } from "../../utils/text.ts";
 
@@ -25,12 +27,39 @@ export interface SlmSettingsPatch {
 	executablePath?: string;
 }
 
+/** One provider entry from models.json: display name, endpoint, and model ids. */
+export interface SlmCatalogEntry {
+	provider: string;
+	name: string | undefined;
+	baseUrl: string | undefined;
+	models: string[];
+}
+
 export function getSlmProviderInfo(settings: UHarnessSettings | undefined): SlmProviderInfo {
 	return {
 		provider: settings?.slm?.provider ?? "openai",
 		baseUrl: settings?.slm?.baseUrl ?? "http://localhost:8000/v1",
 		model: settings?.slm?.model ?? "Qwen/Qwen2.5-Coder-1.5B-Instruct",
 	};
+}
+
+/**
+ * Load the models.json catalog that `/models` reads, validated like any other consumer.
+ * Throws when models.json exists but fails to load or validate.
+ */
+export async function loadSlmCatalog(modelsJsonPath?: string): Promise<SlmCatalogEntry[]> {
+	const config = await ModelConfig.load(modelsJsonPath ?? getModelsPath());
+	const error = config.getError();
+	if (error) throw new Error(error);
+	return config.getProviderIds().map((providerId) => {
+		const provider = config.getProvider(providerId);
+		return {
+			provider: providerId,
+			name: provider?.name,
+			baseUrl: provider?.baseUrl,
+			models: (provider?.models ?? []).map((model) => model.id),
+		};
+	});
 }
 
 export interface ParsedSlmSetArgs {
