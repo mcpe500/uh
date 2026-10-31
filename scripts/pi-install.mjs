@@ -125,11 +125,20 @@ function createWrapper(options) {
 
 	fs.mkdirSync(options.binDir, { recursive: true });
 
+	// Older U-Harness installs created a `pi` wrapper. Replace it with `uh`.
+	for (const legacyName of process.platform === "win32" ? ["pi.cmd"] : ["pi"]) {
+		try {
+			fs.rmSync(path.join(options.binDir, legacyName), { force: true, recursive: true });
+		} catch {
+			// Ignore missing or unremovable legacy wrappers.
+		}
+	}
+
 	if (process.platform === "win32") {
-		const wrapper = path.join(options.binDir, "pi.cmd");
+		const wrapper = path.join(options.binDir, "uh.cmd");
 		fs.writeFileSync(wrapper, `@echo off\r\nnode "${cli}" %*\r\n`, "utf8");
 	} else {
-		const wrapper = path.join(options.binDir, "pi");
+		const wrapper = path.join(options.binDir, "uh");
 		try {
 			fs.rmSync(wrapper, { force: true });
 		} catch {
@@ -139,18 +148,18 @@ function createWrapper(options) {
 		fs.chmodSync(cli, 0o755);
 	}
 
-	const wrapperName = process.platform === "win32" ? "pi.cmd" : "pi";
+	const wrapperName = process.platform === "win32" ? "uh.cmd" : "uh";
 	console.log(`U-Harness installed: ${path.join(options.binDir, wrapperName)}`);
 	if (!process.env.PATH.split(path.delimiter).includes(options.binDir)) {
-		console.log(`Add ${options.binDir} to PATH, then run: pi`);
+		console.log(`Add ${options.binDir} to PATH, then run: uh`);
 	}
 }
 
 function removeWrapper(options) {
-	const names = process.platform === "win32" ? ["pi.cmd"] : ["pi"];
+	const names = process.platform === "win32" ? ["uh.cmd", "pi.cmd"] : ["uh", "pi"];
 	for (const name of names) {
 		try {
-			fs.rmSync(path.join(options.binDir, name), { force: true });
+			fs.rmSync(path.join(options.binDir, name), { force: true, recursive: true });
 		} catch {
 			// The wrapper may already be absent.
 		}
