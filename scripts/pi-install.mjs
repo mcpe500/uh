@@ -90,9 +90,29 @@ function cloneOrUpdate(options, updateOnly) {
 	run("git", ["clone", "--branch", options.branch, "--depth", "1", options.repoUrl, options.installDir]);
 }
 
+function modelDataPath(options) {
+	return path.join(options.installDir, "packages", "ai", "src", "providers", "data", "amazon-bedrock.json");
+}
+
+function hydrateModelData(options) {
+	run("npm", ["run", "hydrate:model-data"], { cwd: options.installDir });
+}
+
 function build(options) {
 	run("npm", ["install", "--ignore-scripts"], { cwd: options.installDir });
-	run("npm", ["run", "build:offline"], { cwd: options.installDir });
+
+	if (!fs.existsSync(modelDataPath(options))) {
+		hydrateModelData(options);
+	}
+
+	try {
+		run("npm", ["run", "build:offline"], { cwd: options.installDir });
+	} catch (error) {
+		// A stale or partial model-data checkout can pass the existence check
+		// but fail check:model-data. Hydrate once and retry the offline build.
+		hydrateModelData(options);
+		run("npm", ["run", "build:offline"], { cwd: options.installDir });
+	}
 }
 
 function cliPath(options) {
