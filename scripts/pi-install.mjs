@@ -1,8 +1,9 @@
 /**
  * Cross-platform installer for the U-Harness fork.
  *
- * The installer keeps Janas external: it only clones or updates this repository,
- * builds it, and creates a wrapper for the built coding-agent CLI.
+ * The installer keeps Janas external: it clones or updates this repository, builds it,
+ * creates a wrapper for the built coding-agent CLI, and can opt in to configuring an
+ * externally installed Janas executable without vendoring or distributing it.
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -13,6 +14,7 @@ const DEFAULT_REPO_URL = "https://github.com/mcpe500/uh.git";
 const DEFAULT_BRANCH = "main";
 const DEFAULT_INSTALL_DIR = path.join(os.homedir(), ".local", "share", "uh");
 const DEFAULT_BIN_DIR = path.join(os.homedir(), ".local", "bin");
+const DEFAULT_JANAS_MODEL = "Qwen/Qwen2.5-Coder-1.5B-Instruct";
 
 function run(command, args, options = {}) {
 	const result = spawnSync(command, args, {
@@ -41,6 +43,9 @@ function parseArgs(argv) {
 		branch: process.env.UH_BRANCH || DEFAULT_BRANCH,
 		installDir: process.env.UH_INSTALL_DIR || DEFAULT_INSTALL_DIR,
 		binDir: process.env.UH_BIN_DIR || DEFAULT_BIN_DIR,
+		setupJanas: process.env.UH_SETUP_JANAS === "1",
+		janasExecutable: process.env.UH_JANAS_EXECUTABLE,
+		janasModel: process.env.UH_JANAS_MODEL || DEFAULT_JANAS_MODEL,
 	};
 
 	for (let i = 1; i < argv.length; i++) {
@@ -50,8 +55,18 @@ function parseArgs(argv) {
 		else if (arg === "--branch") options.branch = argv[++i];
 		else if (arg === "--install-dir") options.installDir = argv[++i];
 		else if (arg === "--bin-dir") options.binDir = argv[++i];
+		else if (arg === "--setup-janas") options.setupJanas = true;
+		else if (arg === "--janas-executable") options.janasExecutable = argv[++i];
+		else if (arg === "--janas-model") options.janasModel = argv[++i];
 		else if (arg === "--help" || arg === "-h") {
-			console.log("Usage: pi-install.mjs <install|update|uninstall> [options]");
+			console.log(`Usage: pi-install.mjs <install|update|uninstall> [options]
+
+Janas setup is opt-in and configures an externally installed Janas executable:
+
+  --setup-janas                    Configure Uh to start Janas for the SLM pipeline
+  --janas-executable <path>        Path to the external janas-server executable
+  --janas-model <model>            SLM model passed to Janas
+`);
 			process.exit(0);
 		} else {
 			throw new Error(`Unknown option: ${arg}`);
@@ -166,11 +181,64 @@ function removeWrapper(options) {
 	}
 }
 
+function agentDir() {
+	return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+}
+
+function parseJsonObjectFile(filePath) {
+	if (!fs.existsSync(filePath)) return {};
+	const parsed = JSON.parse(fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/u, ""));
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error(`Settings file is not a JSON object: ${filePath}`);
+	}
+	return parsed;
+}
+
+function resolvedJanasExecutable(options) {
+	const executable = options.janasExecutable;
+	if (!executable) return undefined;
+	const resolved = path.resolve(executable);
+	try {
+		fs.accessSync(resolved, fs.constants.X_OK);
+	} catch {
+		throw new Error(`Janas executable not found or not executable: ${resolved}`);
+	}
+	return resolved;
+}
+
+function configureJanas(options) {
+	if (!options.setupJanas) return;
+
+	const executablePath = resolvedJanasExecutable(options);
+	const settingsPath = path.join(agentDir(), "settings.json");
+	const settings = parseJsonObjectFile(settingsPath);
+	const uHarness = {
+		...settings.uHarness,
+		pipeline: "u-shaped",
+	};
+	const slm = {
+		...uHarness.slm,
+		provider: "janas",
+		model: options.janasModel,
+		apiKey: "none",
+	};
+	if (executablePath) slm.executablePath = executablePath;
+
+	uHarness.slm = slm;
+	settings.uHarness = uHarness;
+
+	fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+	fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+	console.log(`Janas configured: ${executablePath ?? "janas-server (from PATH)"}`);
+	console.log(`Janas SLM model: ${options.janasModel}`);
+}
+
 function install(options) {
 	ensurePrerequisites();
 	cloneOrUpdate(options, false);
 	build(options);
 	createWrapper(options);
+	configureJanas(options);
 }
 
 function update(options) {
@@ -178,6 +246,7 @@ function update(options) {
 	cloneOrUpdate(options, true);
 	build(options);
 	createWrapper(options);
+	configureJanas(options);
 }
 
 function uninstall(options) {
@@ -208,4 +277,4 @@ if (process.argv[1]?.endsWith("pi-install.mjs")) {
 	main();
 }
 
-export { parseArgs, createWrapper, removeWrapper, cliPath };
+export { parseArgs, createWrapper, removeWrapper, cliPath, configureJanas };
