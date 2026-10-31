@@ -32,7 +32,7 @@ test("createWrapper creates and removes a Unix wrapper", () => {
 	fs.writeFileSync(cli, "#!/usr/bin/env node\n", "utf8");
 
 	createWrapper({ installDir, binDir });
-	const wrapper = path.join(binDir, "pi");
+	const wrapper = path.join(binDir, "uh");
 	assert.equal(fs.lstatSync(wrapper).isSymbolicLink(), true);
 	assert.equal(fs.readlinkSync(wrapper), cli);
 	assert.equal(fs.statSync(cli).mode & 0o111, 0o111);
