@@ -209,6 +209,63 @@ If you need stronger boundaries, containerize or sandbox Pi. See [packages/codin
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).  Longer term plans for Pi can also be found in [RFCs](https://rfc.earendil.com/keyword/pi/).
 
+## Install from GitHub
+
+Linux/macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh | bash
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/mcpe500/uh/main/install.ps1 | iex
+```
+
+Review before running:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh -o /tmp/uh-install.sh
+less /tmp/uh-install.sh
+bash /tmp/uh-install.sh
+```
+
+Configuration:
+
+```bash
+UH_BRANCH=main \
+UH_INSTALL_DIR="$HOME/.local/share/uh" \
+UH_BIN_DIR="$HOME/.local/bin" \
+curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh | bash
+```
+
+Update:
+
+```bash
+./update.sh
+```
+
+On Windows:
+
+```powershell
+.\update.ps1
+```
+
+Uninstall:
+
+```bash
+./uninstall.sh
+```
+
+On Windows:
+
+```powershell
+.\uninstall.ps1
+```
+
+The installer requires Git, Node.js 22.19 or newer, and npm. Janas remains an optional external process and is not bundled.
+
 ## Development
 
 ```bash
