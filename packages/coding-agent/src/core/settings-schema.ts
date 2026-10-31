@@ -216,6 +216,7 @@ const UHarnessSlmSettingsSchema = Type.Object({
 	apiKey: Type.Optional(Type.String({ default: SETTINGS_DEFAULTS.uHarness.slm.apiKey })),
 	maxTokens: Type.Optional(Type.Number({ default: SETTINGS_DEFAULTS.uHarness.slm.maxTokens })),
 	temperature: Type.Optional(Type.Number({ default: SETTINGS_DEFAULTS.uHarness.slm.temperature })),
+	executablePath: Type.Optional(Type.String({ description: "Executable used by the Janas local SLM provider." })),
 });
 
 const UHarnessCoreReasonerSettingsSchema = Type.Object({
