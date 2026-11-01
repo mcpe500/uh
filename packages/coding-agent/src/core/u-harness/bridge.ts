@@ -2,7 +2,12 @@ import type { UHarnessSettings } from "../settings-schema.ts";
 import { ContextLanguageModel } from "./clm.ts";
 import { buildInboundCompressorPrompt, parseArchitecturalBrief } from "./compressor.ts";
 import { appendSlmDebug } from "./debug-log.ts";
-import { extractCanonicalPatches, formatTripletPrompt } from "./decompressor.ts";
+import {
+	buildStepDecompressPrompt,
+	extractCanonicalPatches,
+	formatTripletPrompt,
+	parseVerdict,
+} from "./decompressor.ts";
 import { resolveSlmEndpoint } from "./endpoint.ts";
 import type { CanonicalPatch, RepoFile, TurnExecutionInput, TurnExecutionResult, UHarnessTelemetry } from "./types.ts";
 
@@ -193,6 +198,47 @@ export class UHarnessBridge {
 	 * Runs the outbound decompression stage: turns the assistant's blueprint-style output
 	 * back into canonical full-file patches via the SLM (Triplet Input Confluence).
 	 */
+	/**
+	 * Decompresses and verifies a single assistant step inside the agent loop: expands the
+	 * step against the brief and grades the brief's passing criteria. Never alters the
+	 * transcript or tool calls - the result is evidence only (log + CLM + debug UI).
+	 */
+	async decompressStep(
+		input: { brief: string; assistantOutput: string; requestIndex?: number },
+		callSlm: (prompt: string) => Promise<string> = (prompt) => this.callSlmDefault(prompt, "SLM decompress"),
+	): Promise<{ output: string; verdict: "PASS" | "FAIL" | "PARTIAL" | "UNKNOWN" }> {
+		const startedAt = Date.now();
+		appendSlmDebug({
+			event: "decompress-start",
+			stage: "SLM decompress",
+			requestIndex: input.requestIndex,
+			briefChars: input.brief.length,
+			assistantOutputChars: input.assistantOutput.length,
+		});
+		try {
+			const output = await callSlm(buildStepDecompressPrompt(input.brief, input.assistantOutput));
+			const verdict = parseVerdict(output);
+			appendSlmDebug({
+				event: "decompress-ok",
+				stage: "SLM decompress",
+				requestIndex: input.requestIndex,
+				ms: Date.now() - startedAt,
+				outputChars: output.length,
+				verdict,
+			});
+			return { output, verdict };
+		} catch (error) {
+			appendSlmDebug({
+				event: "decompress-error",
+				stage: "SLM decompress",
+				requestIndex: input.requestIndex,
+				ms: Date.now() - startedAt,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		}
+	}
+
 	async decompressOutbound(
 		input: { brief: string; assistantOutput: string; files?: RepoFile[] },
 		callSlm: (prompt: string) => Promise<string> = (prompt) => this.callSlmDefault(prompt, "SLM decompress"),

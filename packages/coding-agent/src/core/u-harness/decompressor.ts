@@ -27,6 +27,32 @@ diikuti isi lengkap berkas tersebut.`;
 }
 
 /**
+ * Assembles the per-step decompression prompt: expands one assistant step against the
+ * brief and verifies the brief's passing criteria, ending with a `VERDICT:` line.
+ */
+export function buildStepDecompressPrompt(brief: string, assistantOutput: string): string {
+	return `=== 1. ARCHITECTURAL BRIEF ===
+${brief}
+=== END BRIEF ===
+
+=== 2. JAWABAN ASSISTANT (LANGKAH INI) ===
+${assistantOutput}
+=== END ===
+
+TUGAS DEKOMPRESI & VERIFIKASI SLM:
+1. Rekonstruksi penjelasan lengkap dari langkah assistant di atas berdasarkan brief, tanpa placeholder.
+2. Nilai setiap passing criteria pada brief terhadap jawaban tersebut (satu baris bukti per kriteria).
+3. Akhiri output dengan tepat satu baris berformat:
+VERDICT: PASS|FAIL|PARTIAL|UNKNOWN`;
+}
+
+/** Parses the trailing `VERDICT:` marker; anything unparseable stays UNKNOWN. */
+export function parseVerdict(output: string): "PASS" | "FAIL" | "PARTIAL" | "UNKNOWN" {
+	const match = output.match(/VERDICT:\s*(PASS|FAIL|PARTIAL|UNKNOWN)/i);
+	return (match?.[1]?.toUpperCase() as "PASS" | "FAIL" | "PARTIAL" | "UNKNOWN") ?? "UNKNOWN";
+}
+
+/**
  * Deterministically extracts canonical patches marked with `### FILE: <path>` from model output.
  */
 export function extractCanonicalPatches(output: string, marker: string = "### FILE:"): CanonicalPatch[] {
