@@ -260,6 +260,17 @@ function renderPage(): string {
     return undefined;
   }
 
+  // The initial stage SLM call has no requestIndex; per-request SLM calls (history
+  // compression, per-step decompression) carry one. Row 1/Row 3 must show the initial
+  // prompt, not the newest per-request SLM call.
+  function findInitialEntry(entries, runId, event, stage) {
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (e.runId === runId && e.event === event && e.requestIndex === undefined && (stage === undefined || e.stage === stage)) return e;
+    }
+    return undefined;
+  }
+
   function verdictBadge(verdict) {
     var colors = {
       PASS: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
@@ -294,6 +305,8 @@ function renderPage(): string {
       } else if (e.event === "decompress-ok" && e.stage === "SLM decompress") {
         r.verdict = e.verdict;
         r.decompressed = e.outputChars;
+      } else if (e.event === "decompress-skip" && e.stage === "SLM decompress") {
+        r.decompSkip = e.reason;
       }
     });
     var list = Object.keys(map)
@@ -310,9 +323,9 @@ function renderPage(): string {
     var toggle = el(
       "button",
       "toggle-requests px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-purple-300 hover:bg-slate-800 transition",
-      data.list.length + " request \u25B8  \u2212" + data.saved + " chars \u00B7 \u03A3in " + data.totalInput + " tok",
+      data.list.length + " request \u25BE  \u2212" + data.saved + " chars \u00B7 \u03A3in " + data.totalInput + " tok",
     );
-    var container = el("div", "request-triplet hidden space-y-1");
+    var container = el("div", "request-triplet space-y-1");
     toggle.addEventListener("click", function () {
       container.classList.toggle("hidden");
       toggle.textContent = container.classList.contains("hidden")
@@ -328,10 +341,11 @@ function renderPage(): string {
         el("span", "text-slate-400", r.ts ? r.ts.slice(11, 19) : "-"),
         el("span", "text-slate-300", r.usage && r.usage.input !== undefined ? "in " + r.usage.input + " tok" : (r.contextChars !== undefined ? "ctx " + r.contextChars + " ch" : "-")),
         el("span", "text-slate-400", r.ms !== undefined ? r.ms + " ms" : ""),
-        el("span", r.saved > 0 ? "text-cyan-300" : "text-slate-500", "\u2212" + r.saved + " ch" + (r.cacheHits ? " (" + r.cacheHits + " cache)" : "")),
-        r.decompressed !== undefined ? el("span", "text-emerald-300", "exp " + r.decompressed + " ch") : el("span"),
+        el("span", r.saved > 0 ? "text-cyan-300" : "text-slate-500", r.saved > 0 ? "\u2212" + r.saved + " ch" + (r.cacheHits ? " (" + r.cacheHits + " cache)" : "") : "kompres: \u2014"),
+        r.decompressed !== undefined ? el("span", "text-emerald-300", "decomp " + r.decompressed + " ch") : el("span"),
       );
-      line.append(verdictBadge(r.verdict));
+      if (r.decompSkip) line.append(el("span", "text-amber-300", "decomp skip: " + r.decompSkip));
+      else line.append(verdictBadge(r.verdict));
       container.append(line);
     });
     wrap.append(container);
@@ -340,8 +354,8 @@ function renderPage(): string {
 
   function buildRow(runId, entries, stageName, stageLabel, requestStage) {
     var skipped = findEntry(entries, runId, "brief-skipped", stageName);
-    var request = findEntry(entries, runId, "request", stageName);
-    var response = findEntry(entries, runId, "response", stageName);
+    var request = stageName === "LLM" ? undefined : findInitialEntry(entries, runId, "request", stageName);
+    var response = stageName === "LLM" ? undefined : findInitialEntry(entries, runId, "response", stageName);
     var start = stageName === "LLM" ? findEntry(entries, runId, "llm-start") : undefined;
     var end = stageName === "LLM" ? findEntry(entries, runId, "llm-end") : undefined;
 

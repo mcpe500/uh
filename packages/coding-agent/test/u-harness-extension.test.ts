@@ -450,6 +450,21 @@ describe("u-harness per-request wrap", () => {
 				.map((line) => JSON.parse(line) as Record<string, unknown>)
 				.filter((entry) => entry.event === "history-compressed");
 			expect(compressedEvents2.at(-1)?.cached).toBe(true);
+
+			// Nothing compressible (only 1 tool result = within the keep-recent window): log the skip reason.
+			const small = [
+				{ role: "user", content: [{ type: "text", text: "Fix auth" }] },
+				toolResultMessage("read", "X".repeat(600)),
+			];
+			const result3 = await handlers.contextWithSystem?.({ type: "context_with_system", messages: small }, ctx);
+			expect(result3).toBeUndefined();
+			const events3 = readFileSync(logFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			const skip = events3.filter((entry) => entry.event === "history-skip");
+			expect(skip.length).toBeGreaterThan(0);
+			expect(String(skip.at(-1)?.reason)).toContain("tool result");
 		} finally {
 			UHarnessBridge.prototype.callSlmDefault = originalCallSlmDefault;
 			if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
@@ -583,7 +598,7 @@ describe("u-harness per-request wrap", () => {
 			expect(memory).toContain("VERDICT: PASS");
 			expect(memory).toContain("Request 1");
 
-			// Pure tool-call step (no text): decompress skipped, call evidence still logged.
+			// Pure tool-call step (no text): decompress skipped WITH a reason, call evidence still logged.
 			await handlers.context?.({ type: "context", messages: [] }, ctx);
 			await handlers.turnEnd?.(
 				{
@@ -601,6 +616,9 @@ describe("u-harness per-request wrap", () => {
 			expect(events2.filter((entry) => entry.event === "decompress-ok")).toHaveLength(1);
 			const ends = events2.filter((entry) => entry.event === "llm-call-end");
 			expect(ends.at(-1)?.requestIndex).toBe(2);
+			const skip = events2.find((entry) => entry.event === "decompress-skip");
+			expect(skip?.requestIndex).toBe(2);
+			expect(String(skip?.reason)).toContain("teks");
 		} finally {
 			UHarnessBridge.prototype.callSlmDefault = originalCallSlmDefault;
 			if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;

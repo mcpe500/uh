@@ -272,7 +272,15 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 			.map((message, index) => (message.role === "toolResult" ? index : -1))
 			.filter((index) => index >= 0);
 		const compressible = toolResultIndices.slice(0, -HISTORY_KEEP_RECENT_TOOL_RESULTS);
-		if (compressible.length === 0) return undefined;
+		if (compressible.length === 0) {
+			appendSlmDebug({
+				event: "history-skip",
+				stage: "SLM compress",
+				requestIndex: currentRequestIndex,
+				reason: "tidak ada tool result lama yang layak (semua termasuk 2 terbaru)",
+			});
+			return undefined;
+		}
 
 		const output = [...messages];
 		let charsBefore = 0;
@@ -333,7 +341,15 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 			});
 			return undefined;
 		}
-		if (freshCount === 0 && cacheHitCount === 0) return undefined;
+		if (freshCount === 0 && cacheHitCount === 0) {
+			appendSlmDebug({
+				event: "history-skip",
+				stage: "SLM compress",
+				requestIndex: currentRequestIndex,
+				reason: "tidak ada tool result lama di atas ambang ukuran",
+			});
+			return undefined;
+		}
 
 		appendSlmDebug({
 			event: "context-projected",
@@ -379,7 +395,15 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 		if (!pending) return;
 		if (settings?.slm?.perRequestDecompression === false) return;
 		const text = messageText({ content: message.content });
-		if (!text) return;
+		if (!text) {
+			appendSlmDebug({
+				event: "decompress-skip",
+				stage: "SLM decompress",
+				requestIndex: currentRequestIndex,
+				reason: "langkah tanpa teks (pure tool call)",
+			});
+			return;
+		}
 
 		try {
 			const resolvedSettings = await resolveSettings(settings);
