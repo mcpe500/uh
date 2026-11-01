@@ -52,6 +52,7 @@ describe("slm extension", () => {
 
 		expect(extension.commands.get("slm-providers")).toBeDefined();
 		expect(extension.commands.get("slm-models")).toBeDefined();
+		expect(extension.commands.get("slm-log")).toBeDefined();
 		expect(extension.commands.get("slm-set")).toBeDefined();
 	});
 

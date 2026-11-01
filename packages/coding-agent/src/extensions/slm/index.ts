@@ -3,11 +3,13 @@
  *
  * The commands are intentionally small: `/slm-providers` lists the providers in
  * models.json (the same snapshot `/models` reads), `/slm-models` opens a selection
- * menu over that file's models and persists the pick, and `/slm-set` sets a model
- * selection directly.
+ * menu over that file's models and persists the pick, `/slm-log` shows recent
+ * U-Harness SLM debug entries, and `/slm-set` sets a model selection directly.
  */
+import { readFileSync } from "node:fs";
 import { getSettingsPath } from "../../config.ts";
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
+import { isSlmDebugEnabled, slmDebugLogPath } from "../../core/u-harness/debug-log.ts";
 import { listSlmModels, loadSlmCatalog, parseSlmModelEntry, parseSlmSetArgs, setSlmSettings } from "./slm-config.ts";
 
 export default function slmExtension(pi: ExtensionAPI): void {
@@ -52,6 +54,24 @@ export default function slmExtension(pi: ExtensionAPI): void {
 				}
 				setSlmSettings(getSettingsPath(), { provider: parsed.provider, model: parsed.model });
 				ctx.ui.notify(`SLM model set to ${parsed.model} (${parsed.provider})`);
+			} catch (error) {
+				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+			}
+		},
+	});
+
+	pi.registerCommand("slm-log", {
+		description: "Show recent U-Harness SLM debug log entries (set UH_SLM_DEBUG=1 to record)",
+		handler: async (_args, ctx) => {
+			if (!isSlmDebugEnabled()) {
+				ctx.ui.notify("SLM debug logging is off. Start uh with UH_SLM_DEBUG=1 to record SLM requests.");
+				return;
+			}
+			try {
+				const logPath = slmDebugLogPath();
+				const raw = readFileSync(logPath, "utf8").trim();
+				const lines = raw ? raw.split("\n").slice(-30) : [];
+				ctx.ui.notify(lines.length > 0 ? `${logPath}\n\n${lines.join("\n")}` : `Log is empty: ${logPath}`);
 			} catch (error) {
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 			}
