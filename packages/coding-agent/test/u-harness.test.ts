@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SETTINGS_DEFAULTS } from "../src/core/settings-defaults.ts";
 import type { UHarnessSettings } from "../src/core/settings-schema.ts";
@@ -132,6 +135,50 @@ def test_sub():
 	});
 
 	describe("Bridge Orchestration", () => {
+		it("records pipeline stage events in the debug log", async () => {
+			const directory = mkdtempSync(join(tmpdir(), "uh-debug-events-"));
+			const logFile = join(directory, "uh-debug.log");
+			const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+			process.env.UH_SLM_DEBUG = "1";
+			process.env.UH_SLM_DEBUG_LOG = logFile;
+			const bridge = new UHarnessBridge({
+				pipeline: "u-shaped",
+				slm: { baseUrl: "http://localhost:8000/v1" },
+				clm: { enabled: false },
+			});
+
+			try {
+				const result = await bridge.executeTurn({
+					task: "Refactor auth helper",
+					files: [{ path: "auth.ts", content: "export function auth() {}" }],
+					callSlm: async (prompt) =>
+						prompt.includes("TUGAS KOMPRESI SLM")
+							? "=== ARCHITECTURAL BRIEF ===\nTarget: auth.ts\nAdd JWT verify.\n=== END BRIEF ==="
+							: "### FILE: auth.ts\nexport function auth() { return true; }",
+					callCloudReasoner: async () => "Blueprint: verify JWT before issuing sessions.",
+				});
+
+				const events = readFileSync(logFile, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => (JSON.parse(line) as { event: string }).event);
+				expect(events).toEqual([
+					"turn-start",
+					"stage-slm-compress",
+					"stage-cloud-reason",
+					"stage-slm-decompress",
+					"turn-done",
+				]);
+				expect(result.telemetry.pipelineMode).toBe("u-shaped");
+			} finally {
+				if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+				else process.env.UH_SLM_DEBUG = saved.uh;
+				if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+				else process.env.UH_SLM_DEBUG_LOG = saved.log;
+				rmSync(directory, { recursive: true, force: true });
+			}
+		});
+
 		it("retries once when the gateway blocks an upstream on privacy grounds", async () => {
 			const bridge = new UHarnessBridge({
 				pipeline: "u-shaped",

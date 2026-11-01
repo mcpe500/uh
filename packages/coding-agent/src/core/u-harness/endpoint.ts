@@ -11,6 +11,7 @@ import { ModelConfig } from "../model-config.ts";
 import { resolveConfigValue } from "../resolve-config-value.ts";
 import { SETTINGS_DEFAULTS } from "../settings-defaults.ts";
 import type { UHarnessSettings } from "../settings-schema.ts";
+import { appendSlmDebug } from "./debug-log.ts";
 
 /** One resolved SLM endpoint for `callSlmDefault`. */
 export interface SlmEndpoint {
@@ -67,10 +68,31 @@ export async function resolveSlmEndpoint(
 
 	if (!baseUrl) {
 		const catalogNote = config.getError() ? ` (models.json error: ${config.getError()?.split("\n")[0]})` : "";
+		appendSlmDebug({
+			event: "resolve-error",
+			provider: providerId,
+			error: `No SLM endpoint for provider "${providerId}"${catalogNote}`,
+		});
 		throw new Error(
 			`No SLM endpoint for provider "${providerId}": set uHarness.slm.baseUrl or register the provider in models.json${catalogNote}`,
 		);
 	}
+
+	const source =
+		configuredBaseUrl && configuredBaseUrl !== defaults.baseUrl
+			? "settings"
+			: provider?.baseUrl
+				? "models.json"
+				: "default";
+	appendSlmDebug({
+		event: "resolve",
+		provider: providerId,
+		source,
+		baseUrl: baseUrl.replace(/\/+$/, ""),
+		model,
+		hasKey: Boolean(apiKey),
+		catalogError: config.getError()?.split("\n")[0],
+	});
 
 	return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey, model };
 }

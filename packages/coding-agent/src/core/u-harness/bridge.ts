@@ -154,9 +154,27 @@ export class UHarnessBridge {
 		files: RepoFile[],
 		callSlm: (prompt: string) => Promise<string> = (prompt) => this.callSlmDefault(prompt),
 	): Promise<string> {
+		const startedAt = Date.now();
+		appendSlmDebug({ event: "compress-start", taskChars: task.length, files: files.length });
 		const prompt = buildInboundCompressorPrompt(task, files);
-		const raw = await callSlm(prompt);
-		return parseArchitecturalBrief(raw).raw;
+		try {
+			const raw = await callSlm(prompt);
+			const brief = parseArchitecturalBrief(raw).raw;
+			appendSlmDebug({
+				event: "compress-ok",
+				ms: Date.now() - startedAt,
+				briefChars: brief.length,
+				briefPreview: brief.slice(0, 800),
+			});
+			return brief;
+		} catch (error) {
+			appendSlmDebug({
+				event: "compress-error",
+				ms: Date.now() - startedAt,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		}
 	}
 
 	/**
@@ -196,16 +214,29 @@ export class UHarnessBridge {
 
 		// Mode U-Shaped (U-Harness)
 		const slmCaller = input.callSlm ?? ((prompt: string) => this.callSlmDefault(prompt));
+		appendSlmDebug({
+			event: "turn-start",
+			pipelineMode: pipelineMode,
+			taskChars: input.task.length,
+			files: input.files.length,
+		});
 
 		// 1. Stage 1: Inbound Compression via SLM
+		const compressStartedAt = Date.now();
 		const compressionPrompt = buildInboundCompressorPrompt(input.task, input.files);
 		const rawBrief = await slmCaller(compressionPrompt);
 		const architecturalBrief = parseArchitecturalBrief(rawBrief);
+		appendSlmDebug({
+			event: "stage-slm-compress",
+			ms: Date.now() - compressStartedAt,
+			briefChars: architecturalBrief.raw.length,
+		});
 
 		if (this.settings.clm?.enabled !== false) {
 			const mem = this.clm.loadMemory(input.task);
 			const updated = this.clm.updateSection(mem, "ARCHITECTURAL BRIEF", architecturalBrief.raw);
 			this.clm.saveMemory(updated);
+			appendSlmDebug({ event: "clm-update", section: "ARCHITECTURAL BRIEF", path: this.clm.workingMemoryPath });
 		}
 
 		// 2. Stage 2: Core Reasoning via Cloud Engine (Dense Blueprint)
@@ -217,7 +248,13 @@ ${architecturalBrief.raw}
 
 Hasilkan BLUEPRINT SOLUSI terstruktur berupa logika algoritma dan rancangan fungsi. Jangan tulis kode repetitif.`;
 
+		const cloudStartedAt = Date.now();
 		const solutionBlueprint = await input.callCloudReasoner(cloudPrompt);
+		appendSlmDebug({
+			event: "stage-cloud-reason",
+			ms: Date.now() - cloudStartedAt,
+			blueprintChars: solutionBlueprint.length,
+		});
 
 		// 3. Stage 3: Outbound Decompression via SLM (Triplet Confluence)
 		const tripletPrompt = formatTripletPrompt({
@@ -226,11 +263,18 @@ Hasilkan BLUEPRINT SOLUSI terstruktur berupa logika algoritma dan rancangan fung
 			solutionBlueprint,
 		});
 
+		const decompressStartedAt = Date.now();
 		const decompressedOutput = await slmCaller(tripletPrompt);
 		const patches = extractCanonicalPatches(
 			decompressedOutput,
 			this.settings.tripletConfluence?.canonicalMarker ?? "### FILE:",
 		);
+		appendSlmDebug({
+			event: "stage-slm-decompress",
+			ms: Date.now() - decompressStartedAt,
+			outputChars: decompressedOutput.length,
+			patches: patches.length,
+		});
 
 		const telemetry: UHarnessTelemetry = {
 			durationMs: Date.now() - startTime,
@@ -239,6 +283,7 @@ Hasilkan BLUEPRINT SOLUSI terstruktur berupa logika algoritma dan rancangan fung
 			slmOutboundTokens: Math.ceil(tripletPrompt.length / 4),
 			pipelineMode: "u-shaped",
 		};
+		appendSlmDebug({ event: "turn-done", ...telemetry });
 
 		return {
 			pipelineMode: "u-shaped",
