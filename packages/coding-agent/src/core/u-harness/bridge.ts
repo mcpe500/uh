@@ -2,6 +2,7 @@ import type { UHarnessSettings } from "../settings-schema.ts";
 import { ContextLanguageModel } from "./clm.ts";
 import { buildInboundCompressorPrompt, parseArchitecturalBrief } from "./compressor.ts";
 import { extractCanonicalPatches, formatTripletPrompt } from "./decompressor.ts";
+import { resolveSlmEndpoint } from "./endpoint.ts";
 import type { RepoFile, TurnExecutionInput, TurnExecutionResult, UHarnessTelemetry } from "./types.ts";
 
 /**
@@ -19,32 +20,37 @@ export class UHarnessBridge {
 	}
 
 	/**
-	 * Default caller for SLM via OpenAI-compatible REST endpoint (e.g. vLLM).
+	 * Default caller for SLM via OpenAI-compatible REST endpoint (e.g. vLLM or any
+	 * provider registered in models.json).
 	 */
 	async callSlmDefault(prompt: string): Promise<string> {
-		const baseUrl = this.settings.slm?.baseUrl ?? "http://localhost:8000/v1";
-		const model = this.settings.slm?.model ?? "Qwen/Qwen2.5-Coder-1.5B-Instruct";
-		const apiKey = this.settings.slm?.apiKey ?? "none";
+		const endpoint = await resolveSlmEndpoint(this.settings);
 		const temperature = this.settings.slm?.temperature ?? 0.2;
 		const maxTokens = this.settings.slm?.maxTokens ?? 1024;
 
-		const response = await fetch(`${baseUrl}/chat/completions`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${apiKey}`,
-			},
-			body: JSON.stringify({
-				model,
-				messages: [{ role: "user", content: prompt }],
-				temperature,
-				max_tokens: maxTokens,
-			}),
-		});
+		const headers: Record<string, string> = { "Content-Type": "application/json" };
+		if (endpoint.apiKey) headers.Authorization = `Bearer ${endpoint.apiKey}`;
+
+		let response: Response;
+		try {
+			response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					model: endpoint.model,
+					messages: [{ role: "user", content: prompt }],
+					temperature,
+					max_tokens: maxTokens,
+				}),
+			});
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			throw new Error(`SLM request to ${endpoint.baseUrl} failed: ${reason}`);
+		}
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(`SLM vLLM call failed (${response.status}): ${errorText}`);
+			throw new Error(`SLM call failed (${response.status}) from ${endpoint.baseUrl}: ${errorText}`);
 		}
 
 		const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
