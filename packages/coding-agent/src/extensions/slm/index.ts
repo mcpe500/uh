@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { getSettingsPath } from "../../config.ts";
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
 import { isSlmDebugEnabled, slmDebugLogPath } from "../../core/u-harness/debug-log.ts";
+import { getRunningDebugUiUrl } from "../../core/u-harness/debug-server.ts";
 import { listSlmModels, loadSlmCatalog, parseSlmModelEntry, parseSlmSetArgs, setSlmSettings } from "./slm-config.ts";
 
 export default function slmExtension(pi: ExtensionAPI): void {
@@ -71,7 +72,13 @@ export default function slmExtension(pi: ExtensionAPI): void {
 				const logPath = slmDebugLogPath();
 				const raw = readFileSync(logPath, "utf8").trim();
 				const lines = raw ? raw.split("\n").slice(-30) : [];
-				ctx.ui.notify(lines.length > 0 ? `${logPath}\n\n${lines.join("\n")}` : `Log is empty: ${logPath}`);
+				const uiUrl = getRunningDebugUiUrl();
+				const header = uiUrl ? `Debug UI: ${uiUrl}` : "Debug UI off (start with UH_SLM_DEBUG=1)";
+				ctx.ui.notify(
+					lines.length > 0
+						? `${header}\n${logPath}\n\n${lines.join("\n")}`
+						: `${header}\nLog is empty: ${logPath}`,
+				);
 			} catch (error) {
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 			}
