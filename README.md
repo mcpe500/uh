@@ -114,70 +114,58 @@ EOF
 ---
 
 <p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
+  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
 </p>
 
 > New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-# Pi
+# U-Harness (`uh`)
 
-Pi is a minimal, extensible agent harness that you can make your own.
+U-Harness is a research fork of [Pi](https://github.com/earendil-works/pi): a minimal, extensible agent harness that you can make your own, distributed as the `uh` command with the U-Shape Harness pipeline from the section above. See [FORK.md](./FORK.md) for attribution and research scope.
 
-Adapt Pi to your workflows, not the other way around. Customize Pi with [extensions](packages/coding-agent/docs/extensions.md), [skills](packages/coding-agent/docs/skills.md), [prompt templates](packages/coding-agent/docs/prompt-templates.md), and [themes](packages/coding-agent/docs/themes.md). Bundle them as [Pi packages](packages/coding-agent/docs/packages.md) and share via npm or git.
-
-Pi ships with powerful defaults but skips features like sub-agents and plan mode. Ask Pi to build what you want, or install a package that does it your way.
-
-Use Pi [interactively](packages/coding-agent/docs/usage.md), automate it in [print or JSON mode](packages/coding-agent/docs/cli.md), control it over [RPC](packages/coding-agent/docs/rpc.md), or build apps with the [Pi TypeScript SDK](packages/coding-agent/docs/sdk.md). See [OpenClaw](https://github.com/OpenClaw/OpenClaw) for a real-world integration.
+Adapt uh with [extensions](packages/coding-agent/docs/extensions.md), [skills](packages/coding-agent/docs/skills.md), [prompt templates](packages/coding-agent/docs/prompt-templates.md), and [themes](packages/coding-agent/docs/themes.md). Bundle them as [Pi packages](packages/coding-agent/docs/packages.md) and share via npm or git. Use uh [interactively](packages/coding-agent/docs/usage.md), automate it in [print or JSON mode](packages/coding-agent/docs/cli.md), control it over [RPC](packages/coding-agent/docs/rpc.md), or build apps with the [Pi TypeScript SDK](packages/coding-agent/docs/sdk.md).
 
 ## Getting started
 
-Install the command-line interface:
+Install the `uh` command-line interface:
 
 ```bash
-curl -fsSL https://pi.dev/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh | bash
 ```
 
-On Windows:
+The installer clones this repository to `~/.local/share/uh`, builds it, and puts `uh` on your PATH. It requires Git, Node.js 22.19 or newer, and npm. On Windows:
 
-```shell
-powershell -c "irm https://pi.dev/install.ps1 | iex"
+```powershell
+irm https://raw.githubusercontent.com/mcpe500/uh/main/install.ps1 | iex
 ```
 
-The installer pins all dependencies and updates Pi with `pi update`. Alternatively, install directly with npm, which does not pin transitive dependencies:
+Review the script before piping it into a shell:
 
 ```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh -o /tmp/uh-install.sh
+less /tmp/uh-install.sh
+bash /tmp/uh-install.sh
 ```
 
-Pi requires Node.js 22.19 or newer. The macOS, Linux, and Windows installers can install it if needed. Pi does not require dependency lifecycle scripts for a normal npm installation.
+Configuration via environment variables:
 
-Start Pi in the directory where you want it to work:
+```bash
+UH_BRANCH=main \
+UH_INSTALL_DIR="$HOME/.local/share/uh" \
+UH_BIN_DIR="$HOME/.local/bin" \
+curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh | bash
+```
+
+Update an existing installation by re-running the installer, or run `~/.local/share/uh/update.sh`. Uninstall with `~/.local/share/uh/uninstall.sh`.
+
+Start uh in the directory where you want it to work:
 
 ```bash
 cd /path/to/project
-pi
+uh
 ```
 
-For a built-in AI provider, run `/login` inside Pi to connect a subscription or API key. Then give Pi a task.
-
-See the [documentation](https://pi.dev/docs/latest) for full setup and usage instructions, or [visit pi.dev](https://pi.dev) for demos.
-
-## Run with Nix
-
-```bash
-nix run github:earendil-works/pi/stable
-```
-
-`stable` points at the latest release. Install it with `nix profile add github:earendil-works/pi/stable` and update with `nix profile upgrade pi`. Use a release tag such as `github:earendil-works/pi/v1.0.0` to pin a version, or `github:earendil-works/pi` for unreleased changes on `main`. Nix builds Pi from source.
-
-Supports ARM64 and x86-64 on Linux and macOS. Use `nix build .` or `nix run .` to build or run your checkout.
-
-Nix builds are offline, so the bundled model data comes from a pi.dev model catalog revision pinned in `nix/model-catalog.json`. At runtime, Pi still overlays newer catalog data from pi.dev as usual. The Nix workflow replaces the pin on `main` when it no longer matches the checkout, for example after a provider is added or gains a new model type. To refresh it by hand:
-
-```bash
-npm run update:model-catalog-pin
-```
+For a built-in AI provider, run `/login` inside uh to connect a subscription or API key. Then give uh a task. The [documentation](https://pi.dev/docs/latest) covers setup, usage, and the extension APIs uh inherits from Pi.
 
 ## Packages
 
@@ -208,63 +196,6 @@ If you need stronger boundaries, containerize or sandbox Pi. See [packages/codin
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).  Longer term plans for Pi can also be found in [RFCs](https://rfc.earendil.com/keyword/pi/).
-
-## Install from GitHub
-
-Linux/macOS:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh | bash
-```
-
-Windows PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/mcpe500/uh/main/install.ps1 | iex
-```
-
-Review before running:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh -o /tmp/uh-install.sh
-less /tmp/uh-install.sh
-bash /tmp/uh-install.sh
-```
-
-Configuration:
-
-```bash
-UH_BRANCH=main \
-UH_INSTALL_DIR="$HOME/.local/share/uh" \
-UH_BIN_DIR="$HOME/.local/bin" \
-curl -fsSL https://raw.githubusercontent.com/mcpe500/uh/main/install.sh | bash
-```
-
-Update:
-
-```bash
-./update.sh
-```
-
-On Windows:
-
-```powershell
-.\update.ps1
-```
-
-Uninstall:
-
-```bash
-./uninstall.sh
-```
-
-On Windows:
-
-```powershell
-.\uninstall.ps1
-```
-
-The installer requires Git, Node.js 22.19 or newer, and npm. Janas remains an optional external process and is not bundled.
 
 ## Development
 
