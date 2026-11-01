@@ -53,8 +53,12 @@ export class UHarnessBridge {
 			throw new Error(`SLM call failed (${response.status}) from ${endpoint.baseUrl}: ${errorText}`);
 		}
 
-		const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-		return data.choices?.[0]?.message?.content ?? "";
+		const data = (await response.json()) as {
+			choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
+		};
+		// Thinking models answer in reasoning_content and leave content empty; prefer content when present.
+		const message = data.choices?.[0]?.message;
+		return message?.content || message?.reasoning_content || "";
 	}
 
 	/**

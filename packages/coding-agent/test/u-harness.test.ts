@@ -132,6 +132,28 @@ def test_sub():
 	});
 
 	describe("Bridge Orchestration", () => {
+		it("falls back to reasoning_content when the SLM answers without content", async () => {
+			const bridge = new UHarnessBridge({
+				pipeline: "u-shaped",
+				slm: { baseUrl: "http://localhost:9999/v1", model: "thinking-model" },
+				clm: { enabled: false },
+			});
+			const originalFetch = globalThis.fetch;
+			globalThis.fetch = (async () =>
+				new Response(
+					JSON.stringify({
+						choices: [{ message: { content: "", reasoning_content: "Brief: handle greeting input." } }],
+					}),
+					{ status: 200 },
+				)) as typeof fetch;
+
+			try {
+				expect(await bridge.callSlmDefault("compress this")).toBe("Brief: handle greeting input.");
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
 		it("routes to baseline monolithic mode when configured", async () => {
 			const bridge = new UHarnessBridge({
 				pipeline: "baseline",
