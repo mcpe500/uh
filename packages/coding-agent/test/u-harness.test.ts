@@ -132,6 +132,26 @@ def test_sub():
 	});
 
 	describe("Bridge Orchestration", () => {
+		it("parses chat completions even when the gateway appends trailing data", async () => {
+			const bridge = new UHarnessBridge({
+				pipeline: "u-shaped",
+				slm: { baseUrl: "http://localhost:9999/v1", model: "gateway-model" },
+				clm: { enabled: false },
+			});
+			const valid = JSON.stringify({
+				choices: [{ message: { content: "Brief: handle greeting." } }],
+			});
+			const originalFetch = globalThis.fetch;
+			globalThis.fetch = (async () =>
+				new Response(`${valid}${JSON.stringify({ usage: {} })}`, { status: 200 })) as typeof fetch;
+
+			try {
+				expect(await bridge.callSlmDefault("compress this")).toBe("Brief: handle greeting.");
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
 		it("falls back to reasoning_content when the SLM answers without content", async () => {
 			const bridge = new UHarnessBridge({
 				pipeline: "u-shaped",

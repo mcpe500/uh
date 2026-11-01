@@ -6,6 +6,47 @@ import { resolveSlmEndpoint } from "./endpoint.ts";
 import type { RepoFile, TurnExecutionInput, TurnExecutionResult, UHarnessTelemetry } from "./types.ts";
 
 /**
+ * Parse the first complete JSON object from an SLM response body.
+ * Some gateways append trailing data after the chat completion object, which
+ * breaks `response.json()` with "Unexpected non-whitespace character after JSON".
+ */
+function parseSlmResponseJson(body: string): unknown {
+	try {
+		return JSON.parse(body);
+	} catch {
+		// Fall through to scanning for the first complete object.
+	}
+	const start = body.indexOf("{");
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let index = start; start >= 0 && index < body.length; index++) {
+		const character = body[index];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (character === "\\") escaped = true;
+			else if (character === '"') inString = false;
+			continue;
+		}
+		if (character === '"') inString = true;
+		else if (character === "{") depth++;
+		else if (character === "}") {
+			depth--;
+			if (depth !== 0) continue;
+			const candidate = body.slice(start, index + 1);
+			try {
+				return JSON.parse(candidate);
+			} catch {
+				// Malformed candidate (for example unquoted keys); keep scanning.
+				depth = 0;
+			}
+		}
+	}
+	const preview = body.slice(0, 120).replace(/\s+/u, " ");
+	throw new Error(`SLM response was not valid JSON: ${preview}`);
+}
+
+/**
  * U-Harness Provider Bridge.
  * Orchestrates dual-model asymmetric computing (SLM + Cloud) or delegates to baseline monolithic mode.
  */
@@ -53,7 +94,8 @@ export class UHarnessBridge {
 			throw new Error(`SLM call failed (${response.status}) from ${endpoint.baseUrl}: ${errorText}`);
 		}
 
-		const data = (await response.json()) as {
+		const raw = await response.text();
+		const data = parseSlmResponseJson(raw) as {
 			choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
 		};
 		// Thinking models answer in reasoning_content and leave content empty; prefer content when present.
