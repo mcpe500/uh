@@ -1,6 +1,6 @@
 # Slice 10: HTTP and workers (spec)
 
-Status: **approved, building** (owner, 2026-10-30: "just build it";  D1-D12, D10b, round 1's R1-R6 and round 2's Q1-Q6 in the
+Status: **built** (2026-10-31; build reviews by Fable, Opus, Astra and Sol, security audits by Fable, Opus and Astra, four fix rounds with rechecks; the shape after the fix rounds is in §2, §3 and design §23). Approved by the owner (2026-10-30: "just build it"; D1-D12, D10b, round 1's R1-R6 and round 2's Q1-Q6 in the
 decision "Slice 10's points"; spec reviews round 1 by Fable and Opus, `/tmp/s10-spec-review-{fable,opus}.md`, round 2
 by Fable, Opus, Astra and Sol, `/tmp/s10-spec-review2-*.md`, folded in).
 Slice 10 builds two Node components of the app kit (decision "Slice 7b's open points" (6)): `chord/next/http` (the
@@ -39,119 +39,48 @@ and port, the links path, the worker entry with its `execArgv` and `env`, the ho
 
 ## 2. `chord/next/http`
 
+As built after the fix rounds (decisions "The HTTP core is a fetch handler", "The HTTP server is a native object",
+"Settings are arguments, extensions are registries", "The HTTP component's security baseline", "allowed hosts only
+through contributions", "A CSP nonce per response", "three small points", "a route's overhead accepted"); design §23
+states every rule, `src/next-node/http/README.md` the API.
+
 ```ts
-const http = await httpServer(server, {
-	listen: { host: "127.0.0.1", port: 8788 },                       // bootstrap
-	allowedHosts: () => app.allowedHosts(),                           // besides loopback and contributed `hosts` (R4)
-	authenticate: (request, ctx) => app.principalOf(request, ctx),    // D3: the app's policy, per request and upgrade
-	headers: (request, principal) => app.securityHeaders(request, principal),   // every response, also a 404 or a 403
+const http = createHttp(server, {
+	listen: { host: "127.0.0.1", port: 8788 },                        // settings: arguments, a restart to change
 	links: { path: "/chord", options: (request, principal) => ({ limits: linkLimits(principal), maxPayload: 64 * MiB }) },
-	closeTimeout: 30_000,                                             // `close`'s bound on running requests
+	closeTimeout: 30_000,
 	onError: (error) => log(error),                                   // `HttpError`, below
 }, ctx);
-// the component's facet goes into the plugins component's core, so every reload passes it unchanged (7c)
-await plugins.load(server, { kind: "server", core: [{ name: "@app/core", facet: core }, { name: "chord.http", facet: http.facet }] }, ctx);
+const app = defineFacet((_host, self) => {
+	self.contribute(Authenticators, (request, ctx) => principalFromCookie(readCookie(request, "session", secret)));
+	self.contribute(Http, { hosts: ["notes.example.com"], relays: [radiusRelay] });
+});
+await plugins.load(server, { kind: "server", core: [{ name: "chord.http", facet: http.facet }, { name: "@app/core", facet: app }], modules }, ctx);
 …
-await http.close(ctx);   // first (below): no new requests, sockets closed, running requests waited for up to `closeTimeout`
+await http.close(ctx);   // first: no new requests, sockets closed, running requests waited for up to `closeTimeout`
 await workers.close(ctx);
 await server.close(ctx);
 ```
 
-- **Order:** `httpServer` listens at once (plugins see the real port; a page reconnecting while plugins load is not
-  lost). The component resolves `host.registry(Http, ctx)` once (the publication and the router's first `compose`);
-  requests and upgrades arriving before it wait for it (503 after `readyTimeout`), later ones read the router's `.value`
-  per request (no getter, timer or listener per request). Nothing waits for the start barrier: a route's `ctx.get`
-  waits for its object, and `/chord` holds are placed by the publication gate. The plugin name `chord.http` is the
-  component's.
-- **Checks before anything else** (R4), once per request and per upgrade at its start, against the router of that
-  moment: the `Host` header is loopback (`127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`, without a port when it
-  is 80) or allowed (`allowedHosts()` plus every contribution's `hosts`), else 403; an upgrade's `Origin`, when sent,
-  equals the request's origin, else 403; `request.origin` is built only from an accepted `Host` (`http://` on loopback,
-  `https://` for an allowed host). Then `authenticate`. A hook that throws (`allowedHosts`, `authenticate`, `headers`,
-  `links.options`) is a 500, or a refused upgrade (403), reported `hook_failed { hook, error }`.
-- **`Http`** (D1): the registry `"chord.http"` (version 1), defined and served by the component's own facet; its
-  `compose` builds the router from every contribution `{ routes?, wraps?, sockets?, hosts? }`; a contribution may be a
-  writable (a plugin that adds and removes its tunnel host at runtime). Each request uses the router as it was when it
-  started.
-
-```ts
-// plugins/notes/server.ts
-export default defineFacet((host, self) => {
-	self.contribute(Http, {
-		routes: {
-			"GET /notes/:id/export": async (request, ctx) => {
-				if (ctx.principal?.kind !== "owner") return { kind: "error", status: 403 };
-				const notes = await ctx.get(NoteStore, {});
-				return { kind: "json", value: await notes.export({ id: request.params.id }, ctx) };
-			},
-			"GET /notes/template.md": async () => fileResponse(pluginFile("template.md"), { download: "template.md" }),
-		},
-		wraps: [{ name: "audit", phase: "observe", wrap: async (request, next, ctx) => audited(await next(request), ctx) }],
-		sockets: { "/terminal": (socket, request, ctx) => terminals.attach(socket, ctx) },
-	});
-});
-```
-
-- **A request's scope:** one `host.root` scope with the request's principal spans matching, wraps, the route and the
-  whole write of its response; its signal aborts when the client disconnects. `ctx.principal` is `undefined` when
-  `authenticate` found none: the kernel's `host.root(fn, ctx, { principal: undefined })` runs anonymous (§6), never as
-  the server. A socket handler's scope lasts until the socket closes.
-- **`HttpRequest`:** `method`, `path`, `params`, `query` (`URLSearchParams`), `headers` (lowercased, read-only),
-  `origin`, `json(limit?)`, `body(limit?)` (D4). `json` parses at most `limit` bytes (1 MiB by default) into a
-  `JsonValue`; `body` is an async iterable of `Uint8Array` chunks, failing past `limit`. Both throw an `HttpFailure`
-  carrying its status (400 malformed, 413 too large); if it escapes the route, that status is the answer (not 500). A
-  body nobody read is drained up to 64 KiB after the response, else the connection closes (`Connection: close`).
-- **Patterns** (D8): exact segments, `:name` (one non-empty segment, percent-decoded) and a trailing `/*` (the rest,
-  possibly empty: `/files/*` matches `/files`); `params["*"]` is decoded per segment, and a segment that decodes to
-  contain `/` or is `.` or `..` is answered 400. The most specific match wins, segment by segment from the left (exact
-  before `:name` before `*`); one pattern from two contributions is a reported conflict (`registry_conflict`), the first
-  by plugin name wins. `HEAD` falls back to the `GET` route. No route: 404.
-- **Wraps** (D2): `{ name, phase, scope?, route?, wrap(request, next, ctx) }` in the phases `observe`, `headers`,
-  `transform` (outermost first), within a phase in contributor order (plugin name, then type); `scope: "own"` (default:
-  around the contributing plugin's own routes) or `"all"`; `route` narrows to one pattern (a missing one is a reported
-  conflict). A wrap adds a boundary on top of a route's checks, never instead of them. A throwing wrap is a 500,
-  reported naming its plugin.
-- **Responses** (D5, R6):
-
-```ts
-type HttpResponse = { readonly headers?: Readonly<Record<string, string>> } & (
-	| { readonly kind: "json"; readonly value: JsonValue; readonly status?: number }
-	| { readonly kind: "html"; readonly body: string; readonly status?: number }
-	| { readonly kind: "bytes"; readonly mime: string; readonly size?: number;
-	    readonly read: (offset: number, length: number, ctx: Ctx) => Promise<Uint8Array>;
-	    readonly download?: string; readonly ranges?: boolean }
-	| { readonly kind: "redirect"; readonly to: string; readonly status?: 302 | 303 | 307 }
-	| { readonly kind: "error"; readonly status: number; readonly message?: string });
-```
-
-  Headers: the `headers` option's first, then the response's own, replacing same-named ones (case-insensitive: an
-  artifact preview sets its own CSP). `bytes` with a `size`: `Content-Length`; with `ranges`, one range gets 206 and an
-  unsatisfiable one 416, a multi-range request gets 200 with the whole body; `HEAD` sends headers only; `download`
-  sets `Content-Disposition: attachment` with an ASCII fallback and `filename*`. `bytes` without a `size` (R6): chunked
-  encoding, no ranges, `read` called with growing offsets until it returns an empty chunk. Reads are 64 KiB with the
-  socket's backpressure (`drain`), stopped when the client disconnects; a `read` returning fewer bytes than asked with a
-  `size` set destroys the connection (reported). A throwing route is a 500 without its message (reported).
-- **`fileResponse(path, { download?, ranges?, mime? })`:** `stat`s at once, opens its file handle on the first `read`
-  and closes it when the request's scope seals, so an unwritten response (`HEAD`, a 416, a disconnect, a wrap that
-  replaced it) opens nothing or leaks nothing. Without `mime` it picks from a small fixed table by extension (text,
-  images, audio, video), else `application/octet-stream`; active types (HTML, SVG) only when the route names them.
-- **Sockets** (D6, Q6): `sockets: { "/terminal": (socket, request, ctx) => … }`, patterns as routes. After the checks
-  and `authenticate` (no principal: 403 before plugin code), the component upgrades and hands the handler a `ws`
-  WebSocket with an `error` listener already attached (an oversized frame closes it, never the server); per
-  contribution options `maxPayload` (1 MiB by default) and no `perMessageDeflate`. Wraps do not apply. When the
-  contribution that handed it out leaves the table (a reload changing or removing it), the component closes its
-  sockets (1012, "service restart"): old code does not keep serving them (design §17).
-- **The links endpoint:** `links.path` (bootstrap) upgrades to `host.accept(webSocketLink(socket), { principal,
-  limits }, ctx)`, its `limits` and `maxPayload` from `links.options(request, principal)` per socket (a socket keeps
-  what it got); a per-socket output cap (p2's `limitedSocket`: a client that stops reading past 4 MiB unsent is cut off).
-- **Allowed hosts change** (Q6): when the allowed set changes, links and sockets accepted through a `Host` no longer
-  allowed close (1008, "policy").
-- **`close(ctx)`:** new requests and upgrades are refused (503), plugin sockets and links closed (1001), running
-  requests waited for up to `closeTimeout`, then their scopes sealed. Run it before `server.close`, whose seal would
-  otherwise cut running requests mid-write.
+- **The core** is `http.fetch(request, { localAddress?, localPort?, remoteAddress? })`, a Web `Request` to a Web
+  `Response`; `http.upgrade` is Node's upgrade adapter; `nodeRequest(message, res)` converts a Node request with the
+  listener's checks (`{ kind: "request", request, connection } | { kind: "refused", status }`, never a throw) for apps
+  mounting on their own Node server. Chord's own listener (with `listen`) is a host-lifetime object of `chord.http`
+  whose native is a Node server, on a fast path that skips the Web `Request` unless a route or authenticator reads
+  it.
+- **Registries:** `Http` (`"chord.http"`, version 1: `routes`, `wraps`, `sockets`, `maxPayload`, `hosts`, `framers`,
+  `relays`, `csp`; a value or a writable) and `Authenticators` (in contributor order, the first principal wins).
+  Requests before the publication wait for it (503 past `readyTimeout`).
+- **Admission, foreign requests, origins, default headers, cookies, downloads:** the security baseline (design §23).
+  Refusals before any plugin code: a non-loopback socket without an allowed host, forwarded headers without a
+  verified relay, duplicate or missing `Host`, userinfo in `Host`, absolute-form targets (403), unparsable targets
+  (400), `TRACE`/`TRACK`/`CONNECT` (501; a route for them refused at compose).
+- **A request's scope, `HttpRequest`, patterns, wraps, responses, `fileResponse`, sockets, links, revocation,
+  `close`:** design §23. The spec's earlier text (an `httpServer` that listens first, `allowedHosts`, one
+  `authenticate` and a `headers` option, 64 KiB reads) is superseded by those decisions.
 - **Errors** (`onError`, `HttpError`): `route_failed { pattern, plugin, error }`, `wrap_failed { name, plugin, error }`,
-  `socket_failed { pattern, plugin, error }`, `response_failed { pattern, error }` (a short `read`, a write error),
-  `hook_failed { hook, error }`.
+  `socket_failed { pattern, plugin, error }`, `response_failed { pattern, error }`, `hook_failed { hook, plugin?,
+  error }` (`authenticate`, `relay`, `links.options`).
 - `ws` is an optional peer dependency (D7), imported only here.
 
 ## 3. `chord/next/workers`
@@ -230,8 +159,11 @@ await workerMain(async ({ address, start, parent, plugins, onClose }, ctx) => {
   default; checked every second), never before `ready`. A stop (idle, `stop`, `close`): `shutdown`; the child aborts its
   `ctx`, runs the closers registered with `onClose` in reverse order and exits, forcing its own exit after 3 s; the
   server kills the tree after 5 s.
-- **`state`** (R5): per address key `{ status: "starting" | "running" | "stopping", pid, startedAt }` or `{ status:
-  "failed", error: { message, code?, reason? }, at, stderrTail? }`; no entry when stopped or never started.
+- **`state`** (R5, decision "worker errors in public"): per address key `{ status: "starting" | "running" |
+  "stopping", pid, startedAt }` or `{ status: "failed", error: { message, code?, reason? }, at }` with a public error
+  (a fixed message, or the child's redacted `fatal`); no entry when stopped or never started. The full error and the
+  stderr tail go only to `onError` (`worker_failed`); every app hook of a start (`start`, `principal`, `lock`, the
+  fork) is inside that boundary.
 - **`stop(address, ctx)`** (R1, Q3): `RouteHandle.suspend(address)`, then the stop. The suspension lasts while the
   address has holders (they see `failed { waiting }`, "suspended"); with the last holder it goes, and a later hold
   starts the worker on demand; `retry(address)` lifts it at once. Whether an archived session may be opened is the
@@ -252,8 +184,9 @@ await workerMain(async ({ address, start, parent, plugins, onClose }, ctx) => {
   `reloaded { report } | { error }`. One `reload` is outstanding per child at a time: a reload whose caller aborted
   keeps the child's slot until its `reloaded` or the child's exit, and the next waits for it. Errors cross as `{
   message, code?, reason? }`.
-- **Errors** (`onError`, `WorkersError`, which includes `BatchError` for a `state` watch listener that throws): `worker_failed { address, error, stderrTail? }`, `worker_exited { address,
-  code, signal }` (a clean exit after a stop is not reported).
+- **Errors** (`onError`, `WorkersError`, which includes `BatchError` for a `state` watch listener that throws): `worker_failed { address, error, stderrTail? }` (private),
+  `authorize_failed { address, error }` (a throwing `authorize`: the hold is refused `forbidden`), `worker_exited {
+  address, code, signal }` (only for an exit nobody asked for: not after a stop or a start the component failed).
 
 ### Plugins in workers (D11)
 
@@ -310,6 +243,9 @@ channel component (D6); telemetry spans for requests (slice 9).
   the last one.
 - `host.root(fn, ctx, { principal: undefined })` runs anonymous (`ctx.principal` undefined); only an omitted
   `principal` takes the host's (a public-API change of `RootOptions`: `"principal" in options`).
+- Origins only from relays (decision, 2026-10-31, security audit): `origin` is read only on parent and route links;
+  on a child link it is a protocol error; a per-origin record goes once it has no holds, calls or messages in flight.
+- An anonymous `host.root` scope gets no remote object served on its host (`forbidden`).
 - Design §3: the paragraph on a `resolve` waiting for the worker's `load` is updated (done), and "Chord never closes a
   route link itself except at `host.close`" becomes "except at `host.close`, the heartbeat and protocol errors".
 

@@ -115,8 +115,7 @@ table{max-width:100%}
   <div class="cover-stats"><div class="stat"><b>1</b><span>registry plugins contribute routes, wraps, sockets and hosts to</span></div><div class="stat"><b>0</b><span>automatic worker restarts</span></div><div class="stat"><b>5 min</b><span>idle before a worker stops (default)</span></div><div class="stat"><b>6</b><span>security rules on by default</span></div></div>
   <div class="cover-note"><p>Written by the redesign session from <code>slice-10.md</code>, the decision entries &quot;Slice 10&#39;s points&quot;, &quot;Origins only from
 relays&quot;, &quot;The HTTP component&#39;s security baseline&quot; and their neighbours in <code>decisions.md</code>, design §3 and §23, and the
-build in <code>/home/badlogic/pi-7b</code>. The build exists; its fix round (the security baseline among it) is next. Where the
-build and the decisions differ, this book says what is decided.</p>
+build after its four fix rounds (security baseline, <code>fetch</code> core, error boundaries).</p>
 </div>
 </section><div class="inner">
 <nav class="toc"><h2>Contents</h2><ol>
@@ -185,13 +184,14 @@ workers component, then loads its plugins:</p>
 	},
 	onError,
 }, ctx);
-<span class="tk-k">const</span> http = <span class="tk-k">await</span> <span class="tk-f">httpServer</span>(server, { listen: { host: <span class="tk-s">"127.0.0.1"</span>, port: <span class="tk-n">8788</span> }, authenticate, onError }, ctx);
+<span class="tk-k">const</span> http = <span class="tk-f">createHttp</span>(server, { listen: { host: <span class="tk-s">"127.0.0.1"</span>, port: <span class="tk-n">8788</span> }, onError }, ctx);   <span class="tk-c">// settings are arguments</span>
 <span class="tk-k">const</span> workers = <span class="tk-f">createWorkers</span>(server, <span class="tk-t">Session</span>, {
 	kind: <span class="tk-s">"worker"</span>, entry: <span class="tk-s">"./worker.ts"</span>, plugins, principal: (a) =&gt; ({ kind: <span class="tk-s">"worker"</span>, session: a.params.id }),
 	start: (address, ctx) =&gt; ({ id: address.params.id, dir: <span class="tk-f">sessionDir</span>(address) }),
 	lock: (address) =&gt; <span class="tk-s">`chat:${dataDir}:${address.key}`</span>, authorize: mayReach, onError,
 }, ctx);
-<span class="tk-k">await</span> plugins.<span class="tk-f">load</span>(server, { kind: <span class="tk-s">"server"</span>, core: [core, { name: <span class="tk-s">"chord.http"</span>, facet: http.facet }], modules }, ctx);</code></pre>
+<span class="tk-k">await</span> plugins.<span class="tk-f">load</span>(server, { kind: <span class="tk-s">"server"</span>, core: [core, { name: <span class="tk-s">"chord.http"</span>, facet: http.facet }], modules }, ctx);
+<span class="tk-c">// `core` contributes the app's authenticator: self.contribute(Authenticators, authenticate)</span></code></pre>
 <pre><code><span class="tk-c">// worker.ts: one per session</span>
 <span class="tk-k">await</span> <span class="tk-f">workerMain</span>(<span class="tk-k">async</span> ({ address, start, parent, plugins, onClose }, ctx) =&gt; {
 	<span class="tk-k">const</span> store = <span class="tk-k">await</span> <span class="tk-f">openStore</span>(<span class="tk-f">sqliteBackend</span>(<span class="tk-k">await</span> <span class="tk-f">openNodeSqliteDatabase</span>(<span class="tk-f">join</span>(start.dir, <span class="tk-s">"session.sqlite"</span>))), ctx);
@@ -266,22 +266,24 @@ chunks for an upload streamed to disk. A body past its limit gets 413; nothing i
 </section>
 
 <section class="chapter" id="who"><header class="opener"><div class="numeral">IV</div><h2>Who Is Asking</h2><p class="lede">The app&#39;s one security function, and everything the component does so the app does not have to.</p></header>
-<p class="dropcap">The app writes exactly one function about identity:</p>
-<pre><code><span class="tk-k">async</span> <span class="tk-k">function</span> <span class="tk-f">authenticate</span>(request: <span class="tk-t">AuthRequest</span>, ctx: <span class="tk-t">Context</span>): <span class="tk-t">Promise</span>&lt;P | <span class="tk-k">undefined</span>&gt; {
-	<span class="tk-k">const</span> device = <span class="tk-f">verifyCookie</span>(request.cookies.device, secret);
-	<span class="tk-k">if</span> (device) <span class="tk-k">return</span> { kind: <span class="tk-s">"owner"</span>, access: <span class="tk-s">"device"</span>, device: device.id };
-	<span class="tk-k">const</span> guest = <span class="tk-f">verifyCookie</span>(request.cookies.guest, secret);
-	<span class="tk-k">if</span> (guest) <span class="tk-k">return</span> { kind: <span class="tk-s">"guest"</span>, session: guest.session, grant: guest.id };
+<p class="dropcap">The app writes one function about identity and contributes it to the registry <code>Authenticators</code> (plugins may add
+more, a device pairing for instance; the first principal wins):</p>
+<pre><code><span class="tk-k">const</span> authenticate: <span class="tk-t">Authenticator</span> = <span class="tk-k">async</span> (request, ctx) =&gt; {
+	<span class="tk-k">const</span> device = <span class="tk-f">readCookie</span>(request, <span class="tk-s">"device"</span>, secret);       <span class="tk-c">// signature and expiry checked</span>
+	<span class="tk-k">if</span> (device) <span class="tk-k">return</span> { kind: <span class="tk-s">"owner"</span>, access: <span class="tk-s">"device"</span>, device };
+	<span class="tk-k">const</span> guest = <span class="tk-f">readCookie</span>(request, <span class="tk-s">"guest"</span>, secret);
+	<span class="tk-k">if</span> (guest) <span class="tk-k">return</span> { kind: <span class="tk-s">"guest"</span>, grant: guest };
 	<span class="tk-k">if</span> (request.provenance.kind === <span class="tk-s">"local"</span>) <span class="tk-k">return</span> { kind: <span class="tk-s">"owner"</span>, access: <span class="tk-s">"local"</span> };
-	<span class="tk-k">return</span> <span class="tk-k">undefined</span>;                                         <span class="tk-c">// anonymous</span>
-}</code></pre>
+	<span class="tk-k">return</span> <span class="tk-k">undefined</span>;                                             <span class="tk-c">// anonymous</span>
+};
+self.<span class="tk-f">contribute</span>(<span class="tk-t">Authenticators</span>, authenticate);                    <span class="tk-c">// in the app's core facet</span></code></pre>
 <p>It never parses <code>Host</code>, never checks <code>Origin</code> and never sees a foreign request: the component already did all of it.
 It may read <code>request.provenance</code> (<code>local</code>, <code>remote</code> with the host, or <code>relayed</code> through a verified relay such as
-Radius). Cookies are written with the component&#39;s helper, which sets <code>HttpOnly</code>, <code>SameSite</code>, <code>Secure</code> on a remote
-origin and a signature.</p>
+Radius). Cookies are written with <code>cookie(name, value, { secret, request, maxAge })</code>, which sets <code>HttpOnly</code>,
+<code>SameSite</code>, <code>Secure</code> on a remote origin, and signs the value with its expiry.</p>
 <p>Every response, the component&#39;s own 404s and 403s included, carries the same headers: no caching, no MIME sniffing, no
 referrer, no framing (<code>X-Frame-Options: DENY</code> and <code>frame-ancestors &#39;none&#39;</code>, except for framers the app allowed), and a
-Content Security Policy with a per-server script nonce, so an injected <code>&lt;script&gt;</code> does not run.</p>
+Content Security Policy with a fresh script nonce per response (<code>request.nonce</code>), so an injected <code>&lt;script&gt;</code> does not run.</p>
 <table>
 <thead>
 <tr>
@@ -318,9 +320,8 @@ Content Security Policy with a per-server script nonce, so an injected <code>&lt
 <td>the target is parsed by the component, a failure is 400</td>
 </tr>
 </tbody></table>
-<div class="note"><b class="tag">Decided, not yet built</b><p>The security baseline was decided on 2026-10-31 after the security audit and comes with the build&#39;s fix round. The
-build as reviewed checks <code>Host</code> and <code>Origin</code> on upgrades only.</p>
-</div>
+<p>The core is a Web <code>fetch</code> handler, so an app with its own server (Hono, Express, plain Node with <code>nodeRequest</code>) mounts
+it and gets the same checks; without the socket&#39;s addresses a mounted request is never local.</p>
 </section>
 
 <section class="chapter" id="sockets"><header class="opener"><div class="numeral">V</div><h2>Sockets and Links</h2><p class="lede">Chord&#39;s own WebSocket for tabs, a plugin&#39;s own WebSocket for its protocol, and what closes them.</p></header>
@@ -392,20 +393,19 @@ writable, and the router recomposes on each change:</p>
 <pre><code><span class="tk-k">const</span> hosts = self.<span class="tk-f">writable</span>({ hosts: [] <span class="tk-k">as</span> string[] });
 self.<span class="tk-f">contribute</span>(<span class="tk-t">Http</span>, hosts);
 self.<span class="tk-f">on</span>(tunnel.publicHost, ({ value }) =&gt; hosts.<span class="tk-f">set</span>({ hosts: value ? [value] : [] }));</code></pre>
-<p>Functions the components call at each use (<code>authenticate</code>, the security headers&#39; extra sources, a worker&#39;s start
-data, its idle time) can read the app&#39;s own registries, which plugins contribute to. What needs a restart is only the
+<p>Authenticators, framers and extra CSP sources are contributions too; functions the workers component calls at each
+use (a worker&#39;s start data, its idle time) can read the app&#39;s own registries, which plugins contribute to. What needs a restart is only the
 bootstrap: the port, the <code>/chord</code> path, the worker&#39;s entry file and its Node flags.</p>
 </section>
 
-<section class="chapter epilogue" id="what-s-next"><header class="opener"><div class="numeral">∴</div><h2>What&#39;s Next</h2><p class="lede">The fix round, and the decisions it carries.</p></header>
-<p class="dropcap">The build exists and passed its tests; four build reviews and three security audits found the issues the fix round now
-addresses: a malformed request crashing the server, the <code>Host</code>-only provenance, origins invented by a tab (a kernel
-hole since slice 4a, now refused on tab links), secrets reaching guests through worker errors, several close and
-shutdown races in workers and HTTP, and two leaks. With it come the decisions of 2026-10-31: the security baseline,
-relays, allowed hosts only through contributions, public worker errors as fixed messages.</p>
-<p>Still to decide: <code>fileResponse</code> and symbolic links leading out of a served directory; the worker lock on macOS, where
-a stale lock file cannot be taken over safely; and a route&#39;s overhead, measured at 11 to 19 percent of a plain Node
-handler against a bar of 10 percent.</p>
+<section class="chapter epilogue" id="what-s-next"><header class="opener"><div class="numeral">∴</div><h2>What&#39;s Next</h2><p class="lede">What the reviews found, and what comes after this slice.</p></header>
+<p class="dropcap">Four build reviews, three security audits and three rounds of rechecks shaped the slice. They found a malformed request
+crashing the server, <code>Host</code>-only provenance, origins invented by a tab (a kernel hole since slice 4a, now refused on tab
+links), secrets reaching guests through worker errors, close and shutdown races, and leaks of request scopes; each is
+fixed with a regression test. A route costs about 20 µs more than a plain Node handler (12 µs warmed), accepted for
+what it buys: a scope per request, admission and the baseline headers.</p>
+<p>Next comes the app kit (<code>chord/next/app</code>), which wires these components with Chord&#39;s conventions so an app writes
+<code>startApp</code> and <code>startWorker</code>, then slice 11: the browser page and the terminal UI as hosts.</p>
 </section>
 
 <section class="chapter appendix" id="api-in-brief"><header class="opener"><div class="numeral">A</div><h2>API in Brief</h2></header>
@@ -417,8 +417,16 @@ handler against a bar of 10 percent.</p>
 </tr>
 </thead>
 <tbody><tr>
-<td><code>httpServer(host, { listen, authenticate, links?, closeTimeout?, onError }, ctx)</code></td>
-<td>listens, admits, serves <code>Http</code></td>
+<td><code>createHttp(host, { listen?, links?, closeTimeout?, onError }, ctx)</code></td>
+<td>the component: <code>facet</code>, <code>fetch</code>, <code>upgrade</code>, <code>close</code></td>
+</tr>
+<tr>
+<td><code>Authenticators</code> contribution</td>
+<td><code>(request, ctx) =&gt; P | undefined</code>: who a request is</td>
+</tr>
+<tr>
+<td><code>nodeRequest(message, res)</code></td>
+<td>a Node request as a Web <code>Request</code>, with the listener&#39;s checks</td>
 </tr>
 <tr>
 <td><code>http.facet</code></td>
@@ -426,7 +434,7 @@ handler against a bar of 10 percent.</p>
 </tr>
 <tr>
 <td><code>Http</code> contribution</td>
-<td><code>{ routes?, wraps?, sockets?, hosts?, framers?, relays? }</code></td>
+<td><code>{ routes?, wraps?, sockets?, maxPayload?, hosts?, framers?, relays?, csp? }</code></td>
 </tr>
 <tr>
 <td>route</td>
