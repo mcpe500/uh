@@ -72,35 +72,47 @@ export class UHarnessBridge {
 		const headers: Record<string, string> = { "Content-Type": "application/json" };
 		if (endpoint.apiKey) headers.Authorization = `Bearer ${endpoint.apiKey}`;
 
-		let response: Response;
-		try {
-			response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
-				method: "POST",
-				headers,
-				body: JSON.stringify({
-					model: endpoint.model,
-					messages: [{ role: "user", content: prompt }],
-					temperature,
-					max_tokens: maxTokens,
-				}),
-			});
-		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			throw new Error(`SLM request to ${endpoint.baseUrl} failed: ${reason}`);
-		}
+		const privacyMark = "trains on request data";
+		// Gateways like 9router route to an upstream pool and reject requests that land
+		// on a training-on-data upstream; one retry usually lands on an allowed slot.
+		for (let attempt = 1; attempt <= 2; attempt++) {
+			let response: Response;
+			try {
+				response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+					method: "POST",
+					headers,
+					body: JSON.stringify({
+						model: endpoint.model,
+						messages: [{ role: "user", content: prompt }],
+						temperature,
+						max_tokens: maxTokens,
+					}),
+				});
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				throw new Error(`SLM request to ${endpoint.baseUrl} failed: ${reason}`);
+			}
 
-		if (!response.ok) {
-			const errorText = await response.text();
-			throw new Error(`SLM call failed (${response.status}) from ${endpoint.baseUrl}: ${errorText}`);
-		}
+			if (!response.ok) {
+				const errorText = await response.text();
+				if (response.status === 400 && errorText.includes(privacyMark)) {
+					if (attempt === 1) continue;
+					throw new Error(
+						`SLM call blocked by the gateway privacy setting from ${endpoint.baseUrl} (model ${endpoint.model}): allow "paid endpoints that train on request data" in the gateway's Privacy settings`,
+					);
+				}
+				throw new Error(`SLM call failed (${response.status}) from ${endpoint.baseUrl}: ${errorText}`);
+			}
 
-		const raw = await response.text();
-		const data = parseSlmResponseJson(raw) as {
-			choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
-		};
-		// Thinking models answer in reasoning_content and leave content empty; prefer content when present.
-		const message = data.choices?.[0]?.message;
-		return message?.content || message?.reasoning_content || "";
+			const raw = await response.text();
+			const data = parseSlmResponseJson(raw) as {
+				choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
+			};
+			// Thinking models answer in reasoning_content and leave content empty; prefer content when present.
+			const message = data.choices?.[0]?.message;
+			return message?.content || message?.reasoning_content || "";
+		}
+		throw new Error(`SLM request to ${endpoint.baseUrl} failed: retries exhausted`);
 	}
 
 	/**

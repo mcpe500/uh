@@ -132,6 +132,55 @@ def test_sub():
 	});
 
 	describe("Bridge Orchestration", () => {
+		it("retries once when the gateway blocks an upstream on privacy grounds", async () => {
+			const bridge = new UHarnessBridge({
+				pipeline: "u-shaped",
+				slm: { baseUrl: "http://localhost:9999/v1", model: "gateway-model" },
+				clm: { enabled: false },
+			});
+			const privacyBody = JSON.stringify({
+				error: {
+					message:
+						'[400]: {"error":{"message":"Upstream request failed: This model trains on request data. Allow paid endpoints that train on request data in your workspace\'s Privacy settings to use it."}}',
+				},
+			});
+			const successBody = JSON.stringify({ choices: [{ message: { content: "Brief: handle greeting." } }] });
+			const responses = [new Response(privacyBody, { status: 400 }), new Response(successBody, { status: 200 })];
+			const originalFetch = globalThis.fetch;
+			globalThis.fetch = (async () =>
+				responses.shift() ?? new Response(successBody, { status: 200 })) as typeof fetch;
+
+			try {
+				expect(await bridge.callSlmDefault("compress this")).toBe("Brief: handle greeting.");
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
+		it("reports the privacy setting after both attempts are blocked", async () => {
+			const bridge = new UHarnessBridge({
+				pipeline: "u-shaped",
+				slm: { baseUrl: "http://localhost:9999/v1", model: "gateway-model" },
+				clm: { enabled: false },
+			});
+			const privacyBody = JSON.stringify({
+				error: {
+					message:
+						'[400]: {"error":{"message":"Upstream request failed: This model trains on request data. Allow paid endpoints that train on request data in your workspace\'s Privacy settings to use it."}}',
+				},
+			});
+			const originalFetch = globalThis.fetch;
+			globalThis.fetch = (async () => new Response(privacyBody, { status: 400 })) as typeof fetch;
+
+			try {
+				await expect(bridge.callSlmDefault("compress this")).rejects.toThrow(
+					"blocked by the gateway privacy setting",
+				);
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
 		it("parses chat completions even when the gateway appends trailing data", async () => {
 			const bridge = new UHarnessBridge({
 				pipeline: "u-shaped",
