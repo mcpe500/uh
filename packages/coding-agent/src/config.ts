@@ -460,6 +460,16 @@ export function getExportTemplateDir(): string {
 	return join(packageDir, srcOrDist, "core", "export-html");
 }
 
+/** Get path to the U-Harness debug UI vendored assets (mirrors the export-html layout). */
+export function getUHarnessUiVendorDir(): string {
+	if (isBunBinary) {
+		return join(getPackageDir(), "u-harness-ui", "vendor");
+	}
+	const packageDir = getPackageDir();
+	const srcOrDist = existsSync(join(packageDir, "src")) ? "src" : "dist";
+	return join(packageDir, srcOrDist, "core", "u-harness", "ui", "vendor");
+}
+
 /** Get path to package.json */
 export function getPackageJsonPath(): string {
 	return join(getPackageDir(), "package.json");

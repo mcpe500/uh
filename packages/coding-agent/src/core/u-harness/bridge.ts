@@ -76,6 +76,9 @@ export class UHarnessBridge {
 		const privacyMark = "trains on request data";
 		// Gateways like 9router route to an upstream pool and reject requests that land
 		// on a training-on-data upstream; one retry usually lands on an allowed slot.
+		// Full prompt/output up to the cap so the debug UI can show each stage's own
+		// task text; oversized repo context is cut instead of bloating the log.
+		const promptCap = 8000;
 		for (let attempt = 1; attempt <= 2; attempt++) {
 			const startedAt = Date.now();
 			appendSlmDebug({
@@ -85,6 +88,8 @@ export class UHarnessBridge {
 				model: endpoint.model,
 				attempt,
 				promptChars: prompt.length,
+				prompt: prompt.slice(0, promptCap),
+				truncated: prompt.length > promptCap,
 				promptPreview: prompt.slice(0, 200),
 			});
 			let response: Response;
@@ -140,6 +145,8 @@ export class UHarnessBridge {
 				attempt,
 				ms: Date.now() - startedAt,
 				resultChars: result.length,
+				output: result.slice(0, promptCap),
+				truncated: result.length > promptCap,
 				resultPreview: result.slice(0, 200),
 				usedReasoningContent: !message?.content && result.length > 0,
 			});
