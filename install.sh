@@ -19,6 +19,8 @@ mkdir -p "$(dirname "$INSTALL_DIR")"
 if [ -d "$INSTALL_DIR/.git" ]; then
 	git -C "$INSTALL_DIR" fetch --all --tags
 	git -C "$INSTALL_DIR" checkout "$BRANCH"
+	# Generated install directory: lockfile drift from local npm runs must not block updates.
+	git -C "$INSTALL_DIR" restore .
 	git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH"
 elif [ -e "$INSTALL_DIR" ]; then
 	echo "Install directory exists but is not a git repository: $INSTALL_DIR" >&2

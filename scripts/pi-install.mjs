@@ -77,6 +77,9 @@ function cloneOrUpdate(options, updateOnly) {
 	if (fs.existsSync(gitDir)) {
 		run("git", ["-C", options.installDir, "fetch", "--all", "--tags"]);
 		run("git", ["-C", options.installDir, "checkout", options.branch]);
+		// The install directory is generated: lockfile drift from local npm runs
+		// must not block the fast-forward update below.
+		run("git", ["-C", options.installDir, "restore", "."]);
 		run("git", ["-C", options.installDir, "pull", "--ff-only", "origin", options.branch]);
 		return;
 	}
