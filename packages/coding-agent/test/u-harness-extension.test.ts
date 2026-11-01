@@ -224,7 +224,395 @@ describe("u-harness runtime integration", () => {
 			rmSync(directory, { recursive: true, force: true });
 		}
 	});
+});
 
+function toolResultMessage(toolName: string, text: string): unknown {
+	return {
+		role: "toolResult",
+		toolCallId: `call_${toolName}`,
+		toolName,
+		content: [{ type: "text", text }],
+		isError: false,
+		timestamp: Date.now(),
+	};
+}
+
+function messageText(messages: Array<Record<string, unknown>>): number {
+	let total = 0;
+	for (const message of messages) {
+		const content = message.content;
+		if (typeof content === "string") total += content.length;
+		else if (Array.isArray(content)) {
+			for (const part of content as Array<{ type: string; text?: string }>) {
+				if (part.type === "text") total += (part.text ?? "").length;
+			}
+		}
+	}
+	return total;
+}
+
+describe("u-harness per-request wrap", () => {
+	async function loadHandlers() {
+		const runtime = createExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			uHarnessExtension,
+			process.cwd(),
+			createEventBus(),
+			runtime,
+			"builtin:u-harness",
+		);
+		const handler = (name: string) => extension.handlers.get(name)?.[0] as HandlerFn | undefined;
+		return {
+			runtime,
+			before: handler("before_agent_start"),
+			context: handler("context"),
+			contextWithSystem: handler("context_with_system"),
+			turnEnd: handler("turn_end"),
+			end: handler("agent_end"),
+		};
+	}
+
+	function useSettings(settings: Record<string, unknown>) {
+		return settings;
+	}
+
+	it("logs per-request llm-call-start and llm-call-end evidence", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "uh-call-ev-"));
+		const logFile = join(directory, "uh-debug.log");
+		const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+		process.env.UH_SLM_DEBUG = "1";
+		process.env.UH_SLM_DEBUG_LOG = logFile;
+		const handlers = await loadHandlers();
+		handlers.runtime.getSettings = () =>
+			useSettings({ uHarness: { pipeline: "u-shaped", clm: { enabled: false } } }) as any;
+
+		const originalCallSlmDefault = UHarnessBridge.prototype.callSlmDefault;
+		UHarnessBridge.prototype.callSlmDefault = async (prompt: string) =>
+			prompt.includes("TUGAS KOMPRESI SLM")
+				? "=== ARCHITECTURAL BRIEF ===\nTarget: auth.ts\n=== END BRIEF ==="
+				: "ok";
+
+		try {
+			const { ctx } = createHandlerContext();
+			await handlers.before?.(
+				{
+					type: "before_agent_start",
+					messageType: "user",
+					prompt: "Fix auth",
+					systemPrompt: "BASE",
+					systemPromptOptions: {},
+				},
+				ctx,
+			);
+			const messages = [
+				{ role: "user", content: [{ type: "text", text: "Fix auth" }] },
+				{ role: "assistant", content: [{ type: "text", text: "Working on it" }] },
+			];
+			await handlers.context?.({ type: "context", messages }, ctx);
+			await handlers.turnEnd?.(
+				{
+					type: "turn_end",
+					turnIndex: 0,
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: "Done" }],
+						usage: { input: 1200, output: 45, cacheRead: 300, cacheWrite: 0, totalTokens: 1245 },
+					},
+					toolResults: [],
+				},
+				ctx,
+			);
+
+			const events = readFileSync(logFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			const callStart = events.find((entry) => entry.event === "llm-call-start");
+			const callEnd = events.find((entry) => entry.event === "llm-call-end");
+			expect(callStart?.stage).toBe("LLM");
+			expect(callStart?.requestIndex).toBe(1);
+			expect(callStart?.contextChars).toBe(messageText(messages as any));
+			const usage = callEnd?.usage as { input?: number } | undefined;
+			expect(callEnd?.stage).toBe("LLM");
+			expect(callEnd?.requestIndex).toBe(1);
+			expect(usage?.input).toBe(1200);
+			expect(typeof callEnd?.ms).toBe("number");
+
+			await handlers.before?.(
+				{
+					type: "before_agent_start",
+					messageType: "user",
+					prompt: "hello",
+					systemPrompt: "BASE",
+					systemPromptOptions: {},
+				},
+				ctx,
+			);
+			await handlers.context?.({ type: "context", messages }, ctx);
+			const events2 = readFileSync(logFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			const starts = events2.filter((entry) => entry.event === "llm-call-start");
+			expect(starts.at(-1)?.requestIndex).toBe(1);
+			expect(starts.at(-1)?.runId).toBe(2);
+		} finally {
+			UHarnessBridge.prototype.callSlmDefault = originalCallSlmDefault;
+			if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+			else process.env.UH_SLM_DEBUG = saved.uh;
+			if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+			else process.env.UH_SLM_DEBUG_LOG = saved.log;
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it("compresses old tool results per request and caches them", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "uh-req-compress-"));
+		const logFile = join(directory, "uh-debug.log");
+		const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+		process.env.UH_SLM_DEBUG = "1";
+		process.env.UH_SLM_DEBUG_LOG = logFile;
+		const handlers = await loadHandlers();
+		handlers.runtime.getSettings = () =>
+			useSettings({
+				uHarness: { pipeline: "u-shaped", clm: { enabled: false }, slm: { perRequestCompression: true } },
+			}) as any;
+
+		let ringkasCalls = 0;
+		const originalCallSlmDefault = UHarnessBridge.prototype.callSlmDefault;
+		UHarnessBridge.prototype.callSlmDefault = async (prompt: string) => {
+			if (prompt.includes("TUGAS KOMPRESI SLM")) {
+				return "=== ARCHITECTURAL BRIEF ===\nTarget: auth.ts\n=== END BRIEF ===";
+			}
+			if (prompt.includes("TUGAS RINGKAS HISTORY SLM")) {
+				ringkasCalls += 1;
+				return "RINGKASAN SINGKAT";
+			}
+			return "ok";
+		};
+
+		try {
+			const { ctx } = createHandlerContext();
+			await handlers.before?.(
+				{
+					type: "before_agent_start",
+					messageType: "user",
+					prompt: "Fix auth",
+					systemPrompt: "BASE",
+					systemPromptOptions: {},
+				},
+				ctx,
+			);
+			await handlers.context?.({ type: "context", messages: [] }, ctx);
+
+			const messages = [
+				{ role: "system", content: "SYSTEM PROMPT" },
+				{ role: "user", content: [{ type: "text", text: "Fix auth" }] },
+				toolResultMessage("read", "X".repeat(600)),
+				{ role: "assistant", content: [{ type: "text", text: "step" }] },
+				toolResultMessage("bash", "Y".repeat(400)),
+				{ role: "assistant", content: [{ type: "text", text: "latest" }] },
+				toolResultMessage("edit", "Z".repeat(50)),
+			];
+			const result = (await handlers.contextWithSystem?.({ type: "context_with_system", messages }, ctx)) as
+				| { messages: Array<any> }
+				| undefined;
+			expect(result).toBeDefined();
+			const out = result!.messages;
+			expect((out[0] as any).content).toBe("SYSTEM PROMPT");
+			const compressed = (out[2].content as Array<{ text: string }>)[0].text;
+			expect(compressed).toContain("[DIRINGKAS SLM");
+			expect(compressed).toContain("RINGKASAN SINGKAT");
+			expect((out[4].content as Array<{ text: string }>)[0].text).toBe("Y".repeat(400));
+			expect((out[6].content as Array<{ text: string }>)[0].text).toBe("Z".repeat(50));
+
+			const events = readFileSync(logFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			const compressedEvents = events.filter((entry) => entry.event === "history-compressed");
+			expect(compressedEvents).toHaveLength(1);
+			expect(compressedEvents[0]?.charsBefore).toBe(600);
+			expect(compressedEvents[0]?.charsAfter).toBeLessThan(600);
+			expect(compressedEvents[0]?.cached).toBe(false);
+
+			// Same request again: cache hit, no extra SLM call.
+			const before = ringkasCalls;
+			const result2 = (await handlers.contextWithSystem?.({ type: "context_with_system", messages }, ctx)) as
+				| { messages: Array<any> }
+				| undefined;
+			expect(ringkasCalls).toBe(before);
+			const compressed2 = (result2!.messages[2].content as Array<{ text: string }>)[0].text;
+			expect(compressed2).toBe(compressed);
+			const compressedEvents2 = readFileSync(logFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Record<string, unknown>)
+				.filter((entry) => entry.event === "history-compressed");
+			expect(compressedEvents2.at(-1)?.cached).toBe(true);
+		} finally {
+			UHarnessBridge.prototype.callSlmDefault = originalCallSlmDefault;
+			if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+			else process.env.UH_SLM_DEBUG = saved.uh;
+			if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+			else process.env.UH_SLM_DEBUG_LOG = saved.log;
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it("skips compression when perRequestCompression is disabled", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "uh-req-off-"));
+		const logFile = join(directory, "uh-debug.log");
+		const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+		process.env.UH_SLM_DEBUG = "1";
+		process.env.UH_SLM_DEBUG_LOG = logFile;
+		const handlers = await loadHandlers();
+		handlers.runtime.getSettings = () =>
+			useSettings({
+				uHarness: { pipeline: "u-shaped", clm: { enabled: false }, slm: { perRequestCompression: false } },
+			}) as any;
+
+		const originalCallSlmDefault = UHarnessBridge.prototype.callSlmDefault;
+		UHarnessBridge.prototype.callSlmDefault = async (prompt: string) =>
+			prompt.includes("TUGAS KOMPRESI SLM")
+				? "=== ARCHITECTURAL BRIEF ===\nTarget: auth.ts\n=== END BRIEF ==="
+				: "RINGKASAN SINGKAT";
+
+		try {
+			const { ctx } = createHandlerContext();
+			await handlers.before?.(
+				{
+					type: "before_agent_start",
+					messageType: "user",
+					prompt: "Fix auth",
+					systemPrompt: "BASE",
+					systemPromptOptions: {},
+				},
+				ctx,
+			);
+			const messages = [
+				{ role: "user", content: [{ type: "text", text: "Fix auth" }] },
+				toolResultMessage("read", "X".repeat(600)),
+				toolResultMessage("bash", "Y".repeat(400)),
+				toolResultMessage("edit", "Z".repeat(300)),
+			];
+			const result = await handlers.contextWithSystem?.({ type: "context_with_system", messages }, ctx);
+			expect(result).toBeUndefined();
+			const events = readFileSync(logFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			expect(events.some((entry) => entry.event === "history-compressed")).toBe(false);
+		} finally {
+			UHarnessBridge.prototype.callSlmDefault = originalCallSlmDefault;
+			if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+			else process.env.UH_SLM_DEBUG = saved.uh;
+			if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+			else process.env.UH_SLM_DEBUG_LOG = saved.log;
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it("decompresses each assistant step with a verdict and stores it in the CLM", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "uh-req-decomp-"));
+		const logFile = join(directory, "uh-debug.log");
+		const memoryPath = join(directory, "working_memory.md");
+		const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+		process.env.UH_SLM_DEBUG = "1";
+		process.env.UH_SLM_DEBUG_LOG = logFile;
+		const handlers = await loadHandlers();
+		handlers.runtime.getSettings = () =>
+			useSettings({
+				uHarness: {
+					pipeline: "u-shaped",
+					clm: { enabled: true, workingMemoryPath: memoryPath },
+					slm: { perRequestDecompression: true },
+				},
+			}) as any;
+
+		const originalCallSlmDefault = UHarnessBridge.prototype.callSlmDefault;
+		UHarnessBridge.prototype.callSlmDefault = async (prompt: string) => {
+			if (prompt.includes("TUGAS KOMPRESI SLM")) {
+				return "=== ARCHITECTURAL BRIEF ===\nTarget: auth.ts\nPassing criteria:\n- fib(6) == 8\n=== END BRIEF ===";
+			}
+			if (prompt.includes("TUGAS DEKOMPRESI & VERIFIKASI SLM")) {
+				return `Rekonstruksi lengkap langkah: mengubah base case fib.\n\nVERDICT: PASS`;
+			}
+			return "ok";
+		};
+
+		try {
+			const { ctx } = createHandlerContext();
+			await handlers.before?.(
+				{
+					type: "before_agent_start",
+					messageType: "user",
+					prompt: "Fix auth",
+					systemPrompt: "BASE",
+					systemPromptOptions: {},
+				},
+				ctx,
+			);
+			await handlers.context?.(
+				{ type: "context", messages: [{ role: "user", content: [{ type: "text", text: "Fix auth" }] }] },
+				ctx,
+			);
+			await handlers.turnEnd?.(
+				{
+					type: "turn_end",
+					turnIndex: 0,
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: "Mengubah base case fib menjadi n<=0 -> 0." }],
+					},
+					toolResults: [],
+				},
+				ctx,
+			);
+
+			const events = readFileSync(logFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			const decompressOk = events.filter((entry) => entry.event === "decompress-ok");
+			expect(decompressOk).toHaveLength(1);
+			expect(decompressOk[0]?.requestIndex).toBe(1);
+			expect(decompressOk[0]?.verdict).toBe("PASS");
+			const memory = readFileSync(memoryPath, "utf8");
+			expect(memory).toContain("DECOMPRESSED OUTPUT");
+			expect(memory).toContain("VERDICT: PASS");
+			expect(memory).toContain("Request 1");
+
+			// Pure tool-call step (no text): decompress skipped, call evidence still logged.
+			await handlers.context?.({ type: "context", messages: [] }, ctx);
+			await handlers.turnEnd?.(
+				{
+					type: "turn_end",
+					turnIndex: 1,
+					message: { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "read", arguments: {} }] },
+					toolResults: [],
+				},
+				ctx,
+			);
+			const events2 = readFileSync(logFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			expect(events2.filter((entry) => entry.event === "decompress-ok")).toHaveLength(1);
+			const ends = events2.filter((entry) => entry.event === "llm-call-end");
+			expect(ends.at(-1)?.requestIndex).toBe(2);
+		} finally {
+			UHarnessBridge.prototype.callSlmDefault = originalCallSlmDefault;
+			if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+			else process.env.UH_SLM_DEBUG = saved.uh;
+			if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+			else process.env.UH_SLM_DEBUG_LOG = saved.log;
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("per-request wrap", () => {
 	it("skips decompression when the turn produced no assistant message", async () => {
 		const runtime = createExtensionRuntime();
 		const extension = await loadExtensionFromFactory(

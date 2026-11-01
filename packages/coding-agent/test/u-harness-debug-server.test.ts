@@ -24,7 +24,7 @@ function writeLog(entries: Array<Record<string, unknown>>): string {
 	const directory = mkdtempSync(join(tmpdir(), "uh-debug-ui-"));
 	directories.push(directory);
 	const logPath = join(directory, "uh-slm-debug.log");
-	writeFileSync(logPath, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+	writeFileSync(logPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 	return logPath;
 }
 
@@ -67,6 +67,9 @@ describe("u-harness debug UI server", () => {
 		expect(page).toContain("/vendor/fonts/InterVariable.woff2");
 		expect(page).not.toContain("cdn.tailwindcss.com");
 		expect(page).not.toContain("unpkg.com");
+		expect(page).toContain("toggle-requests");
+		expect(page).toContain("request-triplet");
+		expect(page).toContain("verdict-badge");
 
 		const clear = await (await fetch(`${ui.url}/clear`, { method: "POST" })).json();
 		expect(clear.cleared).toBe(true);

@@ -260,6 +260,84 @@ function renderPage(): string {
     return undefined;
   }
 
+  function verdictBadge(verdict) {
+    var colors = {
+      PASS: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+      FAIL: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+      PARTIAL: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+      UNKNOWN: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+    };
+    return el("span", "verdict-badge px-1.5 py-0.5 rounded text-[10px] border font-bold " + (colors[verdict] || colors.UNKNOWN), verdict || "UNKNOWN");
+  }
+
+  function buildRequests(entries, runId) {
+    var map = {};
+    var saved = 0;
+    var totalInput = 0;
+    entries.forEach(function (e) {
+      if (e.runId !== runId || typeof e.requestIndex !== "number") return;
+      var r = map[e.requestIndex] || (map[e.requestIndex] = { idx: e.requestIndex, saved: 0, cacheHits: 0 });
+      if (e.event === "llm-call-start") {
+        r.contextChars = e.contextChars;
+        r.ts = e.ts;
+        r.messages = e.messages;
+      } else if (e.event === "llm-call-end") {
+        r.ms = e.ms;
+        r.usage = e.usage;
+        if (e.usage && typeof e.usage.input === "number") totalInput += e.usage.input;
+      } else if (e.event === "history-compressed") {
+        r.saved += (e.charsBefore || 0) - (e.charsAfter || 0);
+        if (e.cached) r.cacheHits += 1;
+        else saved += (e.charsBefore || 0) - (e.charsAfter || 0);
+      } else if (e.event === "context-projected") {
+        r.projected = e;
+      } else if (e.event === "decompress-ok" && e.stage === "SLM decompress") {
+        r.verdict = e.verdict;
+        r.decompressed = e.outputChars;
+      }
+    });
+    var list = Object.keys(map)
+      .map(function (k) { return map[k]; })
+      .sort(function (a, b) { return a.idx - b.idx; });
+    return { list: list, saved: saved, totalInput: totalInput };
+  }
+
+  function buildRequestTriplet(runId, entries) {
+    var data = buildRequests(entries, runId);
+    var wrap = el("div", "mt-2 space-y-1");
+    if (data.list.length === 0) return null;
+
+    var toggle = el(
+      "button",
+      "toggle-requests px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-purple-300 hover:bg-slate-800 transition",
+      data.list.length + " request \u25B8  \u2212" + data.saved + " chars \u00B7 \u03A3in " + data.totalInput + " tok",
+    );
+    var container = el("div", "request-triplet hidden space-y-1");
+    toggle.addEventListener("click", function () {
+      container.classList.toggle("hidden");
+      toggle.textContent = container.classList.contains("hidden")
+        ? data.list.length + " request \u25B8  \u2212" + data.saved + " chars \u00B7 \u03A3in " + data.totalInput + " tok"
+        : data.list.length + " request \u25BE  \u2212" + data.saved + " chars \u00B7 \u03A3in " + data.totalInput + " tok";
+    });
+    wrap.append(toggle);
+
+    data.list.forEach(function (r) {
+      var line = el("div", "rounded bg-slate-900/80 border border-slate-800 px-2 py-1 flex items-center gap-2 flex-wrap text-[10px] font-mono");
+      line.append(
+        el("span", "text-purple-300 font-bold", "#" + r.idx),
+        el("span", "text-slate-400", r.ts ? r.ts.slice(11, 19) : "-"),
+        el("span", "text-slate-300", r.usage && r.usage.input !== undefined ? "in " + r.usage.input + " tok" : (r.contextChars !== undefined ? "ctx " + r.contextChars + " ch" : "-")),
+        el("span", "text-slate-400", r.ms !== undefined ? r.ms + " ms" : ""),
+        el("span", r.saved > 0 ? "text-cyan-300" : "text-slate-500", "\u2212" + r.saved + " ch" + (r.cacheHits ? " (" + r.cacheHits + " cache)" : "")),
+        r.decompressed !== undefined ? el("span", "text-emerald-300", "exp " + r.decompressed + " ch") : el("span"),
+      );
+      line.append(verdictBadge(r.verdict));
+      container.append(line);
+    });
+    wrap.append(container);
+    return wrap;
+  }
+
   function buildRow(runId, entries, stageName, stageLabel, requestStage) {
     var skipped = findEntry(entries, runId, "brief-skipped", stageName);
     var request = findEntry(entries, runId, "request", stageName);
@@ -311,6 +389,10 @@ function renderPage(): string {
     var stageBadge = el("span", "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-bold text-xs border " + colors[0] + " " + colors[1] + " " + colors[2]);
     stageBadge.append(el("span", "w-2 h-2 rounded-full " + colors[3]), stageName);
     stageWrap.append(stageBadge);
+    if (stageName === "LLM") {
+      var triplet = buildRequestTriplet(runId, entries);
+      if (triplet) stageWrap.append(triplet);
+    }
     stageCell.append(stageWrap);
 
     var promptCell = el("td", "py-3.5 px-4 border-r border-slate-800/80");

@@ -26,6 +26,21 @@ Passing criteria: [poin-poin kriteria lulus pengujian]
 }
 
 /**
+ * Builds the prompt for compressing one old tool result during the per-request
+ * history projection. Output is a plain dense summary (no structured markers).
+ */
+export function buildHistoryCompressPrompt(toolName: string, text: string): string {
+	return `TUGAS RINGKAS HISTORY SLM:
+Ringkas hasil tool berikut menjadi poin-poin padat (maksimal ~300 kata).
+Pertahankan: path berkas, nama simbol/fungsi, angka, error, dan keputusan penting.
+Buang: boilerplate, log berulang, dan isi yang tidak memengaruhi langkah berikutnya.
+
+TOOL: ${toolName}
+ISI:
+${text}`;
+}
+
+/**
  * Parses raw text output from the SLM into an ArchitecturalBrief object.
  */
 export function parseArchitecturalBrief(rawOutput: string): ArchitecturalBrief {

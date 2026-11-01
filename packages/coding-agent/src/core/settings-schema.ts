@@ -217,6 +217,18 @@ const UHarnessSlmSettingsSchema = Type.Object({
 	maxTokens: Type.Optional(Type.Number({ default: SETTINGS_DEFAULTS.uHarness.slm.maxTokens })),
 	temperature: Type.Optional(Type.Number({ default: SETTINGS_DEFAULTS.uHarness.slm.temperature })),
 	executablePath: Type.Optional(Type.String({ description: "Executable used by the Janas local SLM provider." })),
+	perRequestCompression: Type.Optional(
+		Type.Boolean({
+			description:
+				"Compress old tool results via the SLM before every LLM call (default on). Adds one SLM round-trip per newly aged old message.",
+		}),
+	),
+	perRequestDecompression: Type.Optional(
+		Type.Boolean({
+			description:
+				"Expand and verify every assistant step against the brief after each LLM call (default on). Adds one SLM round-trip per step.",
+		}),
+	),
 });
 
 const UHarnessCoreReasonerSettingsSchema = Type.Object({

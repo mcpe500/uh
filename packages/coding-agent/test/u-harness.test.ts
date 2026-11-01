@@ -257,6 +257,56 @@ def test_sub():
 			}
 		});
 
+		it("decompresses a single assistant step and parses the verdict", async () => {
+			const directory = mkdtempSync(join(tmpdir(), "uh-step-"));
+			const logFile = join(directory, "uh-debug.log");
+			const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+			process.env.UH_SLM_DEBUG = "1";
+			process.env.UH_SLM_DEBUG_LOG = logFile;
+			const bridge = new UHarnessBridge({
+				pipeline: "u-shaped",
+				slm: { baseUrl: "http://localhost:9999/v1", model: "gateway-model" },
+				clm: { enabled: false },
+			});
+
+			const prompts: string[] = [];
+			const originalCallSlmDefault = UHarnessBridge.prototype.callSlmDefault;
+			UHarnessBridge.prototype.callSlmDefault = async (prompt: string) => {
+				prompts.push(prompt);
+				return "Langkah lengkap: ubah base case fib.\n\nVERDICT: PASS";
+			};
+
+			try {
+				const result = await bridge.decompressStep({
+					brief: "Target: fib(n)\nPassing criteria:\n- fib(6) == 8",
+					assistantOutput: "Mengubah base case fib.",
+					requestIndex: 3,
+				});
+
+				expect(prompts[0]).toContain("Target: fib(n)");
+				expect(prompts[0]).toContain("Mengubah base case fib.");
+				expect(prompts[0]).toContain("VERDICT");
+				expect(result.output).toContain("Langkah lengkap");
+				expect(result.verdict).toBe("PASS");
+
+				const entries = readFileSync(logFile, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line) as Record<string, unknown>);
+				const ok = entries.find((entry) => entry.event === "decompress-ok");
+				expect(ok?.stage).toBe("SLM decompress");
+				expect(ok?.requestIndex).toBe(3);
+				expect(ok?.verdict).toBe("PASS");
+			} finally {
+				UHarnessBridge.prototype.callSlmDefault = originalCallSlmDefault;
+				if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+				else process.env.UH_SLM_DEBUG = saved.uh;
+				if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+				else process.env.UH_SLM_DEBUG_LOG = saved.log;
+				rmSync(directory, { recursive: true, force: true });
+			}
+		});
+
 		it("records pipeline stage events in the debug log", async () => {
 			const directory = mkdtempSync(join(tmpdir(), "uh-debug-events-"));
 			const logFile = join(directory, "uh-debug.log");
