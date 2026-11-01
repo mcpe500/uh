@@ -12,7 +12,8 @@
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
 import type { UHarnessSettings } from "../../core/settings-schema.ts";
 import { UHarnessBridge } from "../../core/u-harness/bridge.ts";
-import { appendSlmDebug } from "../../core/u-harness/debug-log.ts";
+import { appendSlmDebug, isSlmDebugEnabled, slmDebugLogPath } from "../../core/u-harness/debug-log.ts";
+import { type DebugUiServer, getRunningDebugUiUrl, startDebugUiServer } from "../../core/u-harness/debug-server.ts";
 import { JanasServer } from "../../core/u-harness/janas.ts";
 
 /** Pure greetings and one-word replies gain nothing from compression; skip the SLM round-trip for them. */
@@ -26,6 +27,21 @@ function isConversationalPrompt(prompt: string): boolean {
 
 export default function uHarnessExtension(pi: ExtensionAPI): void {
 	let janasServer: JanasServer | undefined;
+	let debugUi: DebugUiServer | undefined;
+	let debugUiAnnounced = false;
+
+	// With UH_SLM_DEBUG=1, serve the debug log at http://127.0.0.1:<port> (UH_DEBUG_UI_PORT, default 4949).
+	if (isSlmDebugEnabled()) {
+		const preferredPort = Number(process.env.UH_DEBUG_UI_PORT ?? 4949);
+		startDebugUiServer(slmDebugLogPath(), Number.isFinite(preferredPort) ? preferredPort : undefined)
+			.then((ui) => {
+				debugUi = ui;
+				appendSlmDebug({ event: "debug-ui", url: ui.url });
+			})
+			.catch(() => {
+				// The UI is a convenience; pipeline logging keeps working without it.
+			});
+	}
 
 	const resolveSettings = async (settings: UHarnessSettings | undefined): Promise<UHarnessSettings | undefined> => {
 		if ((settings?.slm?.provider ?? "openai") !== "janas") return settings;
@@ -37,6 +53,8 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", async () => {
 		await janasServer?.stop();
 		janasServer = undefined;
+		await debugUi?.close();
+		debugUi = undefined;
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
@@ -50,6 +68,11 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 			promptChars: event.prompt.length,
 			promptPreview: event.prompt.slice(0, 200),
 		});
+		const debugUrl = debugUi?.url ?? getRunningDebugUiUrl();
+		if (debugUrl && !debugUiAnnounced) {
+			debugUiAnnounced = true;
+			ctx.ui.notify(`U-Harness debug UI: ${debugUrl}`);
+		}
 		if (isConversationalPrompt(event.prompt)) {
 			appendSlmDebug({ event: "brief-skipped", reason: "conversational prompt without a coding task" });
 			return;
