@@ -1,6 +1,7 @@
 import type { UHarnessSettings } from "../settings-schema.ts";
 import { ContextLanguageModel } from "./clm.ts";
 import { buildInboundCompressorPrompt, parseArchitecturalBrief } from "./compressor.ts";
+import { appendSlmDebug } from "./debug-log.ts";
 import { extractCanonicalPatches, formatTripletPrompt } from "./decompressor.ts";
 import { resolveSlmEndpoint } from "./endpoint.ts";
 import type { RepoFile, TurnExecutionInput, TurnExecutionResult, UHarnessTelemetry } from "./types.ts";
@@ -76,6 +77,15 @@ export class UHarnessBridge {
 		// Gateways like 9router route to an upstream pool and reject requests that land
 		// on a training-on-data upstream; one retry usually lands on an allowed slot.
 		for (let attempt = 1; attempt <= 2; attempt++) {
+			const startedAt = Date.now();
+			appendSlmDebug({
+				event: "request",
+				baseUrl: endpoint.baseUrl,
+				model: endpoint.model,
+				attempt,
+				promptChars: prompt.length,
+				promptPreview: prompt.slice(0, 200),
+			});
 			let response: Response;
 			try {
 				response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
@@ -90,11 +100,20 @@ export class UHarnessBridge {
 				});
 			} catch (error) {
 				const reason = error instanceof Error ? error.message : String(error);
+				appendSlmDebug({ event: "fetch-error", baseUrl: endpoint.baseUrl, attempt, error: reason });
 				throw new Error(`SLM request to ${endpoint.baseUrl} failed: ${reason}`);
 			}
 
 			if (!response.ok) {
 				const errorText = await response.text();
+				appendSlmDebug({
+					event: "http-error",
+					baseUrl: endpoint.baseUrl,
+					model: endpoint.model,
+					attempt,
+					status: response.status,
+					bodyPreview: errorText.slice(0, 300),
+				});
 				if (response.status === 400 && errorText.includes(privacyMark)) {
 					if (attempt === 1) continue;
 					throw new Error(
@@ -110,7 +129,18 @@ export class UHarnessBridge {
 			};
 			// Thinking models answer in reasoning_content and leave content empty; prefer content when present.
 			const message = data.choices?.[0]?.message;
-			return message?.content || message?.reasoning_content || "";
+			const result = message?.content || message?.reasoning_content || "";
+			appendSlmDebug({
+				event: "response",
+				baseUrl: endpoint.baseUrl,
+				model: endpoint.model,
+				attempt,
+				ms: Date.now() - startedAt,
+				resultChars: result.length,
+				resultPreview: result.slice(0, 200),
+				usedReasoningContent: !message?.content && result.length > 0,
+			});
+			return result;
 		}
 		throw new Error(`SLM request to ${endpoint.baseUrl} failed: retries exhausted`);
 	}
