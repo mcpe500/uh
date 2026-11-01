@@ -29,6 +29,7 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 	let janasServer: JanasServer | undefined;
 	let debugUi: DebugUiServer | undefined;
 	let debugUiAnnounced = false;
+	let pendingTurn: { task: string; brief: string } | undefined;
 
 	// With UH_SLM_DEBUG=1, serve the debug log at http://127.0.0.1:<port> (UH_DEBUG_UI_PORT, default 4949).
 	if (isSlmDebugEnabled()) {
@@ -64,6 +65,7 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 
 		appendSlmDebug({
 			event: "agent-start",
+			stage: "pipeline",
 			pipelineMode: settings?.pipeline ?? "u-shaped",
 			promptChars: event.prompt.length,
 			promptPreview: event.prompt.slice(0, 200),
@@ -74,7 +76,12 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify(`U-Harness debug UI: ${debugUrl}`);
 		}
 		if (isConversationalPrompt(event.prompt)) {
-			appendSlmDebug({ event: "brief-skipped", reason: "conversational prompt without a coding task" });
+			appendSlmDebug({
+				event: "brief-skipped",
+				stage: "SLM compress",
+				reason: "conversational prompt without a coding task",
+			});
+			appendSlmDebug({ event: "llm-start", stage: "LLM" });
 			return;
 		}
 
@@ -83,16 +90,85 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 			const bridge = new UHarnessBridge(resolvedSettings ?? {});
 			const brief = await bridge.compressInbound(event.prompt, []);
 			if (!brief.trim()) {
-				appendSlmDebug({ event: "brief-skipped", reason: "SLM returned an empty brief" });
+				appendSlmDebug({ event: "brief-skipped", stage: "SLM compress", reason: "SLM returned an empty brief" });
+				appendSlmDebug({ event: "llm-start", stage: "LLM" });
 				return;
 			}
-			appendSlmDebug({ event: "brief-injected", briefChars: brief.length, briefPreview: brief.slice(0, 400) });
+			appendSlmDebug({
+				event: "brief-injected",
+				stage: "SLM compress",
+				briefChars: brief.length,
+				briefPreview: brief.slice(0, 400),
+			});
+			pendingTurn = { task: event.prompt, brief };
+			appendSlmDebug({ event: "llm-start", stage: "LLM" });
 			return {
 				systemPrompt: `${event.systemPrompt}\n\n=== U-HARNESS ARCHITECTURAL BRIEF ===\n${brief}\n=== END U-HARNESS BRIEF ===`,
 			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			appendSlmDebug({ event: "agent-error", error: message });
+			appendSlmDebug({ event: "agent-error", stage: "pipeline", error: message });
+			ctx.ui.notify(message, "warning");
+		}
+	});
+
+	// Stage 3: after the main LLM finishes, run SLM decompression on its output.
+	pi.on("agent_end", async (event, ctx) => {
+		appendSlmDebug({ event: "llm-end", stage: "LLM", messages: event.messages.length });
+		const pending = pendingTurn;
+		pendingTurn = undefined;
+		if (!pending) return;
+
+		let assistantOutput = "";
+		for (let index = event.messages.length - 1; index >= 0; index--) {
+			const message = event.messages[index];
+			if (message.role !== "assistant") continue;
+			const content = message.content;
+			assistantOutput =
+				typeof content === "string"
+					? content
+					: (content ?? [])
+							.map((part) => (part.type === "text" ? part.text : ""))
+							.join("")
+							.trim();
+			if (assistantOutput) break;
+		}
+		if (!assistantOutput) {
+			appendSlmDebug({
+				event: "brief-skipped",
+				stage: "SLM decompress",
+				reason: "turn produced no assistant output",
+			});
+			return;
+		}
+
+		try {
+			const settings = pi.getSettings().uHarness;
+			const resolvedSettings = await resolveSettings(settings);
+			const bridge = new UHarnessBridge(resolvedSettings ?? {});
+			const { output, patches } = await bridge.decompressOutbound({
+				brief: pending.brief,
+				assistantOutput,
+			});
+			if (bridge.settings.clm?.enabled !== false) {
+				const memory = bridge.clm.loadMemory(pending.task);
+				bridge.clm.saveMemory(bridge.clm.updateSection(memory, "DECOMPRESSED OUTPUT", output));
+				appendSlmDebug({
+					event: "clm-update",
+					stage: "SLM decompress",
+					section: "DECOMPRESSED OUTPUT",
+					path: bridge.clm.workingMemoryPath,
+				});
+			}
+			appendSlmDebug({
+				event: "decompress-stored",
+				stage: "SLM decompress",
+				patches: patches.length,
+				outputPreview: output.slice(0, 400),
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			appendSlmDebug({ event: "agent-error", stage: "SLM decompress", error: message });
 			ctx.ui.notify(message, "warning");
 		}
 	});

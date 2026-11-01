@@ -135,6 +135,52 @@ def test_sub():
 	});
 
 	describe("Bridge Orchestration", () => {
+		it("tags SLM debug entries with the pipeline stage and decompresses outbound", async () => {
+			const directory = mkdtempSync(join(tmpdir(), "uh-stage-"));
+			const logFile = join(directory, "uh-debug.log");
+			const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+			process.env.UH_SLM_DEBUG = "1";
+			process.env.UH_SLM_DEBUG_LOG = logFile;
+			const bridge = new UHarnessBridge({
+				pipeline: "u-shaped",
+				slm: { baseUrl: "http://localhost:8000/v1" },
+				clm: { enabled: false },
+			});
+
+			const prompts: string[] = [];
+			const originalCallSlmDefault = UHarnessBridge.prototype.callSlmDefault;
+			UHarnessBridge.prototype.callSlmDefault = async (prompt: string) => {
+				prompts.push(prompt);
+				return "### FILE: auth.ts\nexport function auth() { return true; }";
+			};
+
+			try {
+				const result = await bridge.decompressOutbound({
+					brief: "Target: auth.ts",
+					assistantOutput: "Added JWT verification to auth().",
+				});
+
+				expect(prompts[0]).toContain("Target: auth.ts");
+				expect(prompts[0]).toContain("Added JWT verification to auth().");
+				expect(result.patches).toHaveLength(1);
+				expect(result.output).toContain("### FILE: auth.ts");
+
+				const entries = readFileSync(logFile, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line) as { event: string; stage?: string });
+				expect(entries.map((entry) => entry.event)).toEqual(["decompress-start", "decompress-ok"]);
+				expect(entries.every((entry) => entry.stage === "SLM decompress")).toBe(true);
+			} finally {
+				UHarnessBridge.prototype.callSlmDefault = originalCallSlmDefault;
+				if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+				else process.env.UH_SLM_DEBUG = saved.uh;
+				if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+				else process.env.UH_SLM_DEBUG_LOG = saved.log;
+				rmSync(directory, { recursive: true, force: true });
+			}
+		});
+
 		it("records pipeline stage events in the debug log", async () => {
 			const directory = mkdtempSync(join(tmpdir(), "uh-debug-events-"));
 			const logFile = join(directory, "uh-debug.log");

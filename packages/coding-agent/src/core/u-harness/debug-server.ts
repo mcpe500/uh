@@ -77,6 +77,10 @@ function renderPage(): string {
 	tr.event-error td.event-cell { color: #ff7b72; }
 	tr.event-response td.event-cell, tr.event-compress-ok td.event-cell, tr.event-brief-injected td.event-cell { color: #7ee787; }
 	tr.event-brief-skipped td.event-cell { color: #d2a8ff; }
+	td.stage-cell { color: #79c0ff; white-space: nowrap; font-weight: bold; }
+	tr[data-stage="LLM"] td.stage-cell { color: #ffa657; }
+	tr[data-stage="SLM compress"] td.stage-cell { color: #7ee787; }
+	tr[data-stage="SLM decompress"] td.stage-cell { color: #d2a8ff; }
 	pre { white-space: pre-wrap; word-break: break-all; margin: 0; font-size: 11px; }
 	#status { color: #8b949e; font-size: 11px; }
 </style>
@@ -86,7 +90,7 @@ function renderPage(): string {
 <label>event <select id="filter"><option value="">(all)</option></select></label>
 <button id="clear">clear log</button>
 <span id="status"></span>
-<table id="table"><thead><tr><th>time</th><th>event</th><th>detail</th></tr></thead><tbody></tbody></table>
+<table id="table"><thead><tr><th>time</th><th>stage</th><th>event</th><th>detail</th></tr></thead><tbody></tbody></table>
 <script>
 	const tableBody = document.querySelector("#table tbody");
 	const filterSelect = document.querySelector("#filter");
@@ -105,12 +109,17 @@ function renderPage(): string {
 			row.className = "event-" + entry.event;
 			const time = document.createElement("td");
 			time.textContent = String(entry.ts ?? "");
+			const stage = document.createElement("td");
+			stage.className = "stage-cell";
+			const stageName = String(entry.stage ?? "pipeline");
+			stage.textContent = stageName;
+			row.dataset.stage = stageName;
 			const event = document.createElement("td");
 			event.className = "event-cell";
 			event.textContent = String(entry.event ?? "");
 			const detail = document.createElement("td");
 			detail.appendChild(renderDetail(entry));
-			row.append(time, event, detail);
+			row.append(time, stage, event, detail);
 			return row;
 		}));
 		entries.forEach((entry) => knownEvents.add(entry.event));
