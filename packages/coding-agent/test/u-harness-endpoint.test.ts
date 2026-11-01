@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SETTINGS_DEFAULTS } from "../src/core/settings-defaults.ts";
 import type { UHarnessSettings } from "../src/core/settings-schema.ts";
@@ -51,6 +51,10 @@ describe("u-harness SLM endpoint resolution", () => {
 		});
 		const settings = { slm: { provider: "9router-local" } } as UHarnessSettings;
 		process.env.UH_ENDPOINT_TEST_KEY = "sk-env";
+		const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+		const logFile = join(dirname(modelsJsonPath), "uh-debug.log");
+		process.env.UH_SLM_DEBUG = "1";
+		process.env.UH_SLM_DEBUG_LOG = logFile;
 
 		try {
 			expect(await resolveSlmEndpoint(settings, modelsJsonPath)).toEqual({
@@ -58,8 +62,17 @@ describe("u-harness SLM endpoint resolution", () => {
 				apiKey: "sk-env",
 				model: "opendata",
 			});
+			const entry = JSON.parse(readFileSync(logFile, "utf8")) as Record<string, unknown>;
+			expect(entry.event).toBe("resolve");
+			expect(entry.provider).toBe("9router-local");
+			expect(entry.source).toBe("models.json");
+			expect(entry.hasKey).toBe(true);
 		} finally {
 			delete process.env.UH_ENDPOINT_TEST_KEY;
+			if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+			else process.env.UH_SLM_DEBUG = saved.uh;
+			if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+			else process.env.UH_SLM_DEBUG_LOG = saved.log;
 		}
 	});
 
