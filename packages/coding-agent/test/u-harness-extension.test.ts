@@ -1,13 +1,18 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../src/core/event-bus.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
 import { UHarnessBridge } from "../src/core/u-harness/bridge.ts";
+import { setSlmDebugRunId } from "../src/core/u-harness/debug-log.ts";
 import uHarnessExtension from "../src/extensions/u-harness/index.ts";
 
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
+
+afterEach(() => {
+	setSlmDebugRunId(undefined);
+});
 
 function createHandlerContext() {
 	const notifications: Array<{ message: string; type?: string }> = [];
@@ -162,7 +167,17 @@ describe("u-harness runtime integration", () => {
 			const events = readFileSync(logFile, "utf8")
 				.trim()
 				.split("\n")
-				.map((line) => JSON.parse(line) as { event: string; stage?: string });
+				.map(
+					(line) =>
+						JSON.parse(line) as {
+							event: string;
+							stage?: string;
+							runId?: number;
+							prompt?: string;
+							output?: string;
+							ms?: number;
+						},
+				);
 			const stageSequence = events
 				.map((entry) => entry.stage)
 				.filter((stage, index, all) => stage !== all[index - 1]);
@@ -170,6 +185,36 @@ describe("u-harness runtime integration", () => {
 			expect(events.some((entry) => entry.event === "llm-start")).toBe(true);
 			expect(events.some((entry) => entry.event === "llm-end")).toBe(true);
 			expect(events.some((entry) => entry.event === "decompress-ok")).toBe(true);
+
+			const llmStart = events.find((entry) => entry.event === "llm-start");
+			const llmEnd = events.find((entry) => entry.event === "llm-end");
+			expect(llmStart?.prompt).toContain("Add JWT verification to auth.ts");
+			expect(llmStart?.prompt).toContain("Target function: auth() in auth.ts.");
+			expect(llmEnd?.output).toContain("Added JWT verification to auth().");
+			expect(typeof llmEnd?.ms).toBe("number");
+
+			const runIds = new Set(events.filter((entry) => entry.event !== "debug-ui").map((entry) => entry.runId));
+			expect(runIds).toEqual(new Set([1]));
+
+			await beforeHandler?.(
+				{
+					type: "before_agent_start",
+					messageType: "user",
+					prompt: "hello",
+					systemPrompt: "BASE PROMPT",
+					systemPromptOptions: {},
+				},
+				ctx,
+			);
+			const secondEvents = readFileSync(logFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as { event: string; stage?: string; runId?: number; prompt?: string })
+				.slice(events.length);
+			expect(secondEvents.length).toBeGreaterThan(0);
+			expect(new Set(secondEvents.map((entry) => entry.runId))).toEqual(new Set([2]));
+			const secondLlmStart = secondEvents.find((entry) => entry.event === "llm-start");
+			expect(secondLlmStart?.prompt).toBe("SPESIFIKASI TUGAS:\nhello");
 		} finally {
 			UHarnessBridge.prototype.callSlmDefault = originalCallSlmDefault;
 			if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;

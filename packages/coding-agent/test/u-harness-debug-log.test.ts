@@ -2,7 +2,12 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { appendSlmDebug, isSlmDebugEnabled, slmDebugLogPath } from "../src/core/u-harness/debug-log.ts";
+import {
+	appendSlmDebug,
+	isSlmDebugEnabled,
+	setSlmDebugRunId,
+	slmDebugLogPath,
+} from "../src/core/u-harness/debug-log.ts";
 
 const directories: string[] = [];
 
@@ -11,6 +16,7 @@ function tempEnv(logFile: string, debug?: string): NodeJS.ProcessEnv {
 }
 
 afterEach(() => {
+	setSlmDebugRunId(undefined);
 	for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -50,5 +56,21 @@ describe("u-harness SLM debug log", () => {
 
 		expect(() => readFileSync(logFile, "utf8")).toThrow();
 		expect(slmDebugLogPath(tempEnv(logFile, "1"))).toBe(logFile);
+	});
+
+	it("attaches the current run id to every entry while one is set", () => {
+		const directory = mkdtempSync(join(tmpdir(), "uh-run-"));
+		directories.push(directory);
+		const logFile = join(directory, "uh-slm-debug.log");
+		const env = tempEnv(logFile, "1");
+
+		setSlmDebugRunId(3);
+		appendSlmDebug({ event: "request" }, env);
+		setSlmDebugRunId(undefined);
+		appendSlmDebug({ event: "response" }, env);
+
+		const lines = readFileSync(logFile, "utf8").trim().split("\n");
+		expect(JSON.parse(lines[0] ?? "{}").runId).toBe(3);
+		expect("runId" in JSON.parse(lines[1] ?? "{}")).toBe(false);
 	});
 });

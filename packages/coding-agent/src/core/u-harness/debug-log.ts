@@ -20,6 +20,14 @@ export function slmDebugLogPath(env: NodeJS.ProcessEnv = process.env): string {
 	return env.UH_SLM_DEBUG_LOG ?? `${getAgentDir()}/uh-slm-debug.log`;
 }
 
+/** Run id attached to every entry while set; the extension bumps it once per turn. */
+let currentRunId: number | undefined;
+
+/** Set the run id stamped onto subsequent debug entries (undefined clears it). */
+export function setSlmDebugRunId(runId: number | undefined): void {
+	currentRunId = runId;
+}
+
 /** Append one entry as a JSON line; failures are swallowed so logging cannot break the pipeline. */
 export function appendSlmDebug(entry: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): void {
 	if (!isSlmDebugEnabled(env)) return;
@@ -27,7 +35,8 @@ export function appendSlmDebug(entry: Record<string, unknown>, env: NodeJS.Proce
 		const logPath = slmDebugLogPath(env);
 		mkdirSync(dirname(logPath), { recursive: true });
 		const safeEntry = "apiKey" in entry ? { ...entry, apiKey: "[redacted]" } : entry;
-		appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), ...safeEntry })}\n`);
+		const runId = currentRunId !== undefined ? { runId: currentRunId } : {};
+		appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), ...runId, ...safeEntry })}\n`);
 	} catch {
 		// Debug logging must never break the pipeline.
 	}

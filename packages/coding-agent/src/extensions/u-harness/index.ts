@@ -12,7 +12,12 @@
 import type { ExtensionAPI } from "../../core/extensions/types.ts";
 import type { UHarnessSettings } from "../../core/settings-schema.ts";
 import { UHarnessBridge } from "../../core/u-harness/bridge.ts";
-import { appendSlmDebug, isSlmDebugEnabled, slmDebugLogPath } from "../../core/u-harness/debug-log.ts";
+import {
+	appendSlmDebug,
+	isSlmDebugEnabled,
+	setSlmDebugRunId,
+	slmDebugLogPath,
+} from "../../core/u-harness/debug-log.ts";
 import { type DebugUiServer, getRunningDebugUiUrl, startDebugUiServer } from "../../core/u-harness/debug-server.ts";
 import { JanasServer } from "../../core/u-harness/janas.ts";
 
@@ -30,6 +35,8 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 	let debugUi: DebugUiServer | undefined;
 	let debugUiAnnounced = false;
 	let pendingTurn: { task: string; brief: string } | undefined;
+	let runCounter = 0;
+	let llmStartedAt: number | undefined;
 
 	// With UH_SLM_DEBUG=1, serve the debug log at http://127.0.0.1:<port> (UH_DEBUG_UI_PORT, default 4949).
 	if (isSlmDebugEnabled()) {
@@ -63,6 +70,9 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 		if ((settings?.pipeline ?? "u-shaped") !== "u-shaped") return;
 		if (event.messageType !== "user" || !event.prompt.trim()) return;
 
+		runCounter += 1;
+		setSlmDebugRunId(runCounter);
+		llmStartedAt = Date.now();
 		appendSlmDebug({
 			event: "agent-start",
 			stage: "pipeline",
@@ -81,7 +91,7 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 				stage: "SLM compress",
 				reason: "conversational prompt without a coding task",
 			});
-			appendSlmDebug({ event: "llm-start", stage: "LLM" });
+			appendSlmDebug({ event: "llm-start", stage: "LLM", prompt: `SPESIFIKASI TUGAS:\n${event.prompt}` });
 			return;
 		}
 
@@ -91,7 +101,7 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 			const brief = await bridge.compressInbound(event.prompt, []);
 			if (!brief.trim()) {
 				appendSlmDebug({ event: "brief-skipped", stage: "SLM compress", reason: "SLM returned an empty brief" });
-				appendSlmDebug({ event: "llm-start", stage: "LLM" });
+				appendSlmDebug({ event: "llm-start", stage: "LLM", prompt: `SPESIFIKASI TUGAS:\n${event.prompt}` });
 				return;
 			}
 			appendSlmDebug({
@@ -101,7 +111,11 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 				briefPreview: brief.slice(0, 400),
 			});
 			pendingTurn = { task: event.prompt, brief };
-			appendSlmDebug({ event: "llm-start", stage: "LLM" });
+			appendSlmDebug({
+				event: "llm-start",
+				stage: "LLM",
+				prompt: `SPESIFIKASI TUGAS:\n${event.prompt}\n\nARCHITECTURAL BRIEF (DARI SLM COMPRESS):\n${brief}`,
+			});
 			return {
 				systemPrompt: `${event.systemPrompt}\n\n=== U-HARNESS ARCHITECTURAL BRIEF ===\n${brief}\n=== END U-HARNESS BRIEF ===`,
 			};
@@ -114,11 +128,6 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 
 	// Stage 3: after the main LLM finishes, run SLM decompression on its output.
 	pi.on("agent_end", async (event, ctx) => {
-		appendSlmDebug({ event: "llm-end", stage: "LLM", messages: event.messages.length });
-		const pending = pendingTurn;
-		pendingTurn = undefined;
-		if (!pending) return;
-
 		let assistantOutput = "";
 		for (let index = event.messages.length - 1; index >= 0; index--) {
 			const message = event.messages[index];
@@ -133,6 +142,18 @@ export default function uHarnessExtension(pi: ExtensionAPI): void {
 							.trim();
 			if (assistantOutput) break;
 		}
+		appendSlmDebug({
+			event: "llm-end",
+			stage: "LLM",
+			messages: event.messages.length,
+			ms: llmStartedAt !== undefined ? Date.now() - llmStartedAt : undefined,
+			output: assistantOutput,
+		});
+		llmStartedAt = undefined;
+		const pending = pendingTurn;
+		pendingTurn = undefined;
+		if (!pending) return;
+
 		if (!assistantOutput) {
 			appendSlmDebug({
 				event: "brief-skipped",

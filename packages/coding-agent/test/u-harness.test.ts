@@ -181,6 +181,82 @@ def test_sub():
 			}
 		});
 
+		it("logs the full stage prompt and output on each SLM request and response", async () => {
+			const directory = mkdtempSync(join(tmpdir(), "uh-full-prompt-"));
+			const logFile = join(directory, "uh-debug.log");
+			const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+			process.env.UH_SLM_DEBUG = "1";
+			process.env.UH_SLM_DEBUG_LOG = logFile;
+			const bridge = new UHarnessBridge({
+				pipeline: "u-shaped",
+				slm: { baseUrl: "http://localhost:9999/v1", model: "gateway-model" },
+				clm: { enabled: false },
+			});
+			const fullPrompt = `SPESIFIKASI TUGAS:\nFix auth\n\nTUGAS KOMPRESI SLM:\n${"X".repeat(500)}`;
+			const fullOutput = "B".repeat(900);
+			const successBody = JSON.stringify({ choices: [{ message: { content: fullOutput } }] });
+			const originalFetch = globalThis.fetch;
+			globalThis.fetch = (async () => new Response(successBody, { status: 200 })) as typeof fetch;
+
+			try {
+				await bridge.callSlmDefault(fullPrompt, "SLM compress");
+
+				const entries = readFileSync(logFile, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line) as Record<string, unknown>);
+				const request = entries.find((entry) => entry.event === "request");
+				const response = entries.find((entry) => entry.event === "response");
+				expect(request?.prompt).toBe(fullPrompt);
+				expect(request?.truncated).toBe(false);
+				expect(response?.output).toBe(fullOutput);
+				expect(response?.truncated).toBe(false);
+			} finally {
+				globalThis.fetch = originalFetch;
+				if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+				else process.env.UH_SLM_DEBUG = saved.uh;
+				if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+				else process.env.UH_SLM_DEBUG_LOG = saved.log;
+				rmSync(directory, { recursive: true, force: true });
+			}
+		});
+
+		it("caps oversized prompts in the debug log and flags the truncation", async () => {
+			const directory = mkdtempSync(join(tmpdir(), "uh-cap-"));
+			const logFile = join(directory, "uh-debug.log");
+			const saved = { uh: process.env.UH_SLM_DEBUG, log: process.env.UH_SLM_DEBUG_LOG };
+			process.env.UH_SLM_DEBUG = "1";
+			process.env.UH_SLM_DEBUG_LOG = logFile;
+			const bridge = new UHarnessBridge({
+				pipeline: "u-shaped",
+				slm: { baseUrl: "http://localhost:9999/v1", model: "gateway-model" },
+				clm: { enabled: false },
+			});
+			const oversizedPrompt = "P".repeat(9000);
+			const successBody = JSON.stringify({ choices: [{ message: { content: "ok" } }] });
+			const originalFetch = globalThis.fetch;
+			globalThis.fetch = (async () => new Response(successBody, { status: 200 })) as typeof fetch;
+
+			try {
+				await bridge.callSlmDefault(oversizedPrompt, "SLM compress");
+
+				const entries = readFileSync(logFile, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line) as Record<string, unknown>);
+				const request = entries.find((entry) => entry.event === "request");
+				expect(request?.prompt).toBe(oversizedPrompt.slice(0, 8000));
+				expect(request?.truncated).toBe(true);
+			} finally {
+				globalThis.fetch = originalFetch;
+				if (saved.uh === undefined) delete process.env.UH_SLM_DEBUG;
+				else process.env.UH_SLM_DEBUG = saved.uh;
+				if (saved.log === undefined) delete process.env.UH_SLM_DEBUG_LOG;
+				else process.env.UH_SLM_DEBUG_LOG = saved.log;
+				rmSync(directory, { recursive: true, force: true });
+			}
+		});
+
 		it("records pipeline stage events in the debug log", async () => {
 			const directory = mkdtempSync(join(tmpdir(), "uh-debug-events-"));
 			const logFile = join(directory, "uh-debug.log");
