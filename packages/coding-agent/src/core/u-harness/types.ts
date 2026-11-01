@@ -38,7 +38,7 @@ export interface UHarnessTelemetry {
 export interface TurnExecutionInput {
 	task: string;
 	files: RepoFile[];
-	callSlm?: (prompt: string) => Promise<string>;
+	callSlm?: (prompt: string, stage?: string) => Promise<string>;
 	callCloudReasoner: (prompt: string) => Promise<string>;
 }
 
