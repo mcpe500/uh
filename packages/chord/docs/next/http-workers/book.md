@@ -11,8 +11,7 @@ stats:
 note: |
   Written by the redesign session from `slice-10.md`, the decision entries "Slice 10's points", "Origins only from
   relays", "The HTTP component's security baseline" and their neighbours in `decisions.md`, design §3 and §23, and the
-  build in `/home/badlogic/pi-7b`. The build exists; its fix round (the security baseline among it) is next. Where the
-  build and the decisions differ, this book says what is decided.
+  build after its four fix rounds (security baseline, `fetch` core, error boundaries).
 colophon: Serving and Spawning · first edition · 2026-10-31 · Chord v2 slice 10
 ---
 
@@ -75,13 +74,14 @@ const plugins = createPlugins({
 	},
 	onError,
 }, ctx);
-const http = await httpServer(server, { listen: { host: "127.0.0.1", port: 8788 }, authenticate, onError }, ctx);
+const http = createHttp(server, { listen: { host: "127.0.0.1", port: 8788 }, onError }, ctx);   // settings are arguments
 const workers = createWorkers(server, Session, {
 	kind: "worker", entry: "./worker.ts", plugins, principal: (a) => ({ kind: "worker", session: a.params.id }),
 	start: (address, ctx) => ({ id: address.params.id, dir: sessionDir(address) }),
 	lock: (address) => `chat:${dataDir}:${address.key}`, authorize: mayReach, onError,
 }, ctx);
 await plugins.load(server, { kind: "server", core: [core, { name: "chord.http", facet: http.facet }], modules }, ctx);
+// `core` contributes the app's authenticator: self.contribute(Authenticators, authenticate)
 ```
 
 ```ts
@@ -198,27 +198,29 @@ A route that throws is a 500 without its message: error text often holds paths o
 
 # Who Is Asking {#who lede="The app's one security function, and everything the component does so the app does not have to."}
 
-The app writes exactly one function about identity:
+The app writes one function about identity and contributes it to the registry `Authenticators` (plugins may add
+more, a device pairing for instance; the first principal wins):
 
 ```ts
-async function authenticate(request: AuthRequest, ctx: Context): Promise<P | undefined> {
-	const device = verifyCookie(request.cookies.device, secret);
-	if (device) return { kind: "owner", access: "device", device: device.id };
-	const guest = verifyCookie(request.cookies.guest, secret);
-	if (guest) return { kind: "guest", session: guest.session, grant: guest.id };
+const authenticate: Authenticator = async (request, ctx) => {
+	const device = readCookie(request, "device", secret);       // signature and expiry checked
+	if (device) return { kind: "owner", access: "device", device };
+	const guest = readCookie(request, "guest", secret);
+	if (guest) return { kind: "guest", grant: guest };
 	if (request.provenance.kind === "local") return { kind: "owner", access: "local" };
-	return undefined;                                         // anonymous
-}
+	return undefined;                                             // anonymous
+};
+self.contribute(Authenticators, authenticate);                    // in the app's core facet
 ```
 
 It never parses `Host`, never checks `Origin` and never sees a foreign request: the component already did all of it.
 It may read `request.provenance` (`local`, `remote` with the host, or `relayed` through a verified relay such as
-Radius). Cookies are written with the component's helper, which sets `HttpOnly`, `SameSite`, `Secure` on a remote
-origin and a signature.
+Radius). Cookies are written with `cookie(name, value, { secret, request, maxAge })`, which sets `HttpOnly`,
+`SameSite`, `Secure` on a remote origin, and signs the value with its expiry.
 
 Every response, the component's own 404s and 403s included, carries the same headers: no caching, no MIME sniffing, no
 referrer, no framing (`X-Frame-Options: DENY` and `frame-ancestors 'none'`, except for framers the app allowed), and a
-Content Security Policy with a per-server script nonce, so an injected `<script>` does not run.
+Content Security Policy with a fresh script nonce per response (`request.nonce`), so an injected `<script>` does not run.
 
 | Attack | What stops it |
 | --- | --- |
@@ -230,10 +232,8 @@ Content Security Policy with a per-server script nonce, so an injected `<script>
 | a path like `/files/..%2F..%2Fsecret` | decoded `/`, `.`, `..`, `\` in a path segment are 400 |
 | a crafted request target crashes the server | the target is parsed by the component, a failure is 400 |
 
-:::note | Decided, not yet built
-The security baseline was decided on 2026-10-31 after the security audit and comes with the build's fix round. The
-build as reviewed checks `Host` and `Origin` on upgrades only.
-:::
+The core is a Web `fetch` handler, so an app with its own server (Hono, Express, plain Node with `nodeRequest`) mounts
+it and gets the same checks; without the socket's addresses a mounted request is never local.
 
 # Sockets and Links {#sockets lede="Chord's own WebSocket for tabs, a plugin's own WebSocket for its protocol, and what closes them."}
 
@@ -346,29 +346,30 @@ self.contribute(Http, hosts);
 self.on(tunnel.publicHost, ({ value }) => hosts.set({ hosts: value ? [value] : [] }));
 ```
 
-Functions the components call at each use (`authenticate`, the security headers' extra sources, a worker's start
-data, its idle time) can read the app's own registries, which plugins contribute to. What needs a restart is only the
+Authenticators, framers and extra CSP sources are contributions too; functions the workers component calls at each
+use (a worker's start data, its idle time) can read the app's own registries, which plugins contribute to. What needs a restart is only the
 bootstrap: the port, the `/chord` path, the worker's entry file and its Node flags.
 
-# What's Next {.epilogue lede="The fix round, and the decisions it carries."}
+# What's Next {.epilogue lede="What the reviews found, and what comes after this slice."}
 
-The build exists and passed its tests; four build reviews and three security audits found the issues the fix round now
-addresses: a malformed request crashing the server, the `Host`-only provenance, origins invented by a tab (a kernel
-hole since slice 4a, now refused on tab links), secrets reaching guests through worker errors, several close and
-shutdown races in workers and HTTP, and two leaks. With it come the decisions of 2026-10-31: the security baseline,
-relays, allowed hosts only through contributions, public worker errors as fixed messages.
+Four build reviews, three security audits and three rounds of rechecks shaped the slice. They found a malformed request
+crashing the server, `Host`-only provenance, origins invented by a tab (a kernel hole since slice 4a, now refused on tab
+links), secrets reaching guests through worker errors, close and shutdown races, and leaks of request scopes; each is
+fixed with a regression test. A route costs about 20 µs more than a plain Node handler (12 µs warmed), accepted for
+what it buys: a scope per request, admission and the baseline headers.
 
-Still to decide: `fileResponse` and symbolic links leading out of a served directory; the worker lock on macOS, where
-a stale lock file cannot be taken over safely; and a route's overhead, measured at 11 to 19 percent of a plain Node
-handler against a bar of 10 percent.
+Next comes the app kit (`chord/next/app`), which wires these components with Chord's conventions so an app writes
+`startApp` and `startWorker`, then slice 11: the browser page and the terminal UI as hosts.
 
 # API in Brief {.appendix}
 
 | Call | What it does |
 | --- | --- |
-| `httpServer(host, { listen, authenticate, links?, closeTimeout?, onError }, ctx)` | listens, admits, serves `Http` |
+| `createHttp(host, { listen?, links?, closeTimeout?, onError }, ctx)` | the component: `facet`, `fetch`, `upgrade`, `close` |
+| `Authenticators` contribution | `(request, ctx) => P \| undefined`: who a request is |
+| `nodeRequest(message, res)` | a Node request as a Web `Request`, with the listener's checks |
 | `http.facet` | the facet serving `Http`; load it with the plugins (in `core`) |
-| `Http` contribution | `{ routes?, wraps?, sockets?, hosts?, framers?, relays? }` |
+| `Http` contribution | `{ routes?, wraps?, sockets?, maxPayload?, hosts?, framers?, relays?, csp? }` |
 | route | `(request, ctx) => Promise<HttpResponse>`, or `{ handler, page?, crossSite? }` |
 | `fileResponse(path, options)`, `cookie(name, value, options)` | a file as bytes; a safe cookie |
 | `createWorkers(host, Kind, { kind, entry, start, lock, principal, authorize, plugins, idleMs?, onError }, ctx)` | a worker per address |

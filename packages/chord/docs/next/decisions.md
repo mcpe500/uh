@@ -1877,7 +1877,7 @@ validation and copies the v2 kernel added around Delta.
   reload, swapping the committed plugin back silently. Rejected: resolving with the report after the commit despite
   the abort (it would change the rule that an abort after the commit rejects). Examples for 7c (owner): full coverage,
   each example a folder with the host code and real plugin directories (35-39).
-- **Slice 10's points (owner, 2026-10-30; `slice-10.md`):** (D1, "a") the HTTP component defines the registry `Http`
+- **Slice 10's points (owner, 2026-10-30; `slice-10.md`):** (D1, "a"; `httpServer` **superseded** by `createHttp`, decisions "The HTTP core is a fetch handler" and "Settings are arguments") the HTTP component defines the registry `Http`
   (`"chord.http"`) and serves it through a facet of its own (`http.facet`, plugin name `chord.http`) that the app loads
   with its plugins; its `compose` builds the router; the server reads it with `host.registry(Http, ctx)` per request.
   (D2, "a") Wraps are built in slice 10 as designed (decision "HTTP routes and wraps", design §23): a contribution's
@@ -1885,7 +1885,7 @@ validation and copies the v2 kernel added around Delta.
   phase in contributor order, by default around their own plugin's routes (`scope: "own"`; `"all"` explicit; `route`
   narrows to one, a missing one a reported conflict). The server's `headers` option stays for every response, also
   those no route makes (a 404, a refused request).
-  (D3, "a") Authentication is one app function, `authenticate(request, ctx) => P | undefined`, called once per request
+  (D3, "a"; **superseded** by "The HTTP server is a native object": the `Authenticators` registry) Authentication is one app function, `authenticate(request, ctx) => P | undefined`, called once per request
   and per upgrade; no Chord registry of resolvers (p3 composes its own from sharing, devices and the relay, with its
   own precedence rules).
   (D4, "k": a) Request bodies: `request.json(limit?)` (parsed JSON, 1 MiB by default, malformed: 400) and
@@ -1948,7 +1948,7 @@ validation and copies the v2 kernel added around Delta.
   (R3, "a"; refines D9) The child reports only the flip: `{ idle: true }` when every count (`host.activity` and `busy`)
   becomes zero, `{ idle: false }` when one becomes nonzero; the server's idle clock starts at `true` (a status message
   costs about 6 µs on each side, a local call 2.9 µs: no report per call).
-  (R4, "a if configurable at runtime so allowed domains can be added and removed by a plugin") Before `authenticate`, the
+  (R4; **superseded in part** by "allowed hosts only through contributions" and "The HTTP component's security baseline": no `allowedHosts` option, provenance by the socket; "a if configurable at runtime so allowed domains can be added and removed by a plugin") Before `authenticate`, the
   component refuses (403) a `Host` that is neither loopback nor allowed, and an upgrade (`/chord`, a plugin socket)
   whose `Origin` is not the request's own origin; `request.origin` comes only from an accepted `Host` (`http://` on
   loopback, `https://` for an allowed host); `headers(request, principal)` gets the principal. Allowed hosts are the
@@ -2089,6 +2089,57 @@ validation and copies the v2 kernel added around Delta.
   (before the rework +4.5 µs): the request's scope (2.1 µs), URL parsing, admission and routing, the baseline's headers,
   the scope's seal, and about 5 µs of Node's microtask machinery an async path triggers. Accepted against the 10% bar.
   No `request.header(name)` accessor: an authenticator reading headers builds the Web `Request` (about 3.5 µs more).
+- **A CSP nonce per response (owner, 2026-10-31: "csp ok"; Fable's recheck):** the HTTP component makes a fresh script
+  nonce for every response (`request.nonce`), not one per server: a nonce read from one page cannot be reused by an
+  injected script elsewhere.
+- **Settings are arguments, extensions are registries (owner, 2026-10-31: "making that config a registry is dumb; it's a
+  general problem for all host-lifetime natives that need initialization at host startup"; "k"; supersedes the
+  `HttpConfig` registry of "The HTTP server is a native object"):** what the app decides once at startup (a port, frame
+  limits, a timeout, a data directory, which implementation to use) is an argument to the component's facet, which base
+  code constructs; the facet and its host-lifetime objects close over it; changing it is a restart; no plugin can
+  touch it. What plugins add while the app runs (routes, authenticators, tools, panels, more indexers) is a registry.
+  HTTP: `createHttp(host, { listen, links, closeTimeout, onError }, ctx)`; `Http` and `Authenticators` stay registries.
+  The same for the harness (its store and defaults as arguments; models, environments, extensions as registries) and
+  the app kit's components (a session index takes its indexer as an argument, and may also follow a registry of
+  indexers if plugins should supply them).
+- **API versions in the import path (owner, 2026-10-31: "this sounds about right"; "must be declared by the plugin in
+  code, we do not want to dig around package.json files anymore"):** the app's base code is internal except its API
+  modules, which it exposes as host packages with a version in the path (`@acme/app/v3`; Chord's
+  `@earendil-works/chord/next/v2`); the app lists the versions it still provides (an older one as the same module, or a
+  thin layer); an import of an unlisted version is a build error naming the available ones. No `package.json` field
+  and no npm ranges for this. Contracts and registry tokens inside an API keep their own versions. The rest of the
+  plugin model is a proposal (`docs/next/plugin-model/`).
+- **A schema package beneath pi-ai and Chord (owner, 2026-10-31: "i want the schema package"; "if we keep it a
+  dependency in pi-ai, we must be able to rip it out"; TypeBox is "horrible to treeshake"):** a small package with no
+  dependencies (working name `@earendil-works/schema`) under both pi-ai and Chord (siblings: neither depends on the
+  other): helpers returning plain JSON Schema, a structural `JsonSchema` type, `Static` from the helpers' literal
+  types, and a validator for general JSON Schema (tool schemas from MCP servers and extensions use `$ref`, `anyOf`,
+  `pattern`, ...), without `eval` or `new Function` (CSP-safe). Chord v2 drops TypeBox; pi-ai's core never imports
+  it (TypeBox schemas still pass as JSON Schema; TypeBox-typed extras only in an optional subpath, so ripping it out
+  is deleting that subpath). Not omptype (its validator compiles with `new Function`; its 10.7k lines are mostly
+  ArkType's API). Open: which validator (measure `@cfworker/json-schema` and TypeBox against the official
+  JSON-Schema-Test-Suite and Chord's argument checks first), and moving `Type` out of pi-ai's main export.
+  **Built** (owner, 2026-10-31: "clone pi add the package, done"; pi `fab2c53`): `packages/schema`,
+  `@earendil-works/pi-schema`: `compile(schema, { draft, formats, schemas })` with `check` (narrowing) and `errors`
+  (JSON Pointer paths), Chord-style builders typed with `Static`, formats as the opt-in `./formats` entry, leaf and regex
+  checks shared through weak caches (GC-tested); its own closure-compiled validator, chosen after measuring
+  (`/tmp/schema-measure.md`, Radius 01m69x3dz2fsg9k1r33vde7hv6): 2,222 of 2,223 core suite tests (TypeBox 2,200,
+  cfworker 2,167, omptype 1,522), Chord checks at 0.95-1.3x TypeBox's compiled speed and the same with `new Function`
+  blocked, 7.9 MB for 3,200 distinct schemas (cfworker 7.6, TypeBox 54.7), 8.5 KB gzip. Still open: switching Chord v2
+  and pi-ai to it (`Type` out of pi-ai's main export), formats on by default in pi-ai.
+- **The schema switch (owner, 2026-10-31):** TypeBox leaves Chord (v1 too: "remove typebox wherever we can"),
+  pi-ai, pi-agent-core and pi-durable; extensions must not break ("absolutely 100%"), proven by a guard over our own
+  extensions, built-in tools and generated arguments (verdicts, coerced arguments, provider payloads and inferred
+  parameter types identical; owner: "just use ours", no npm corpus). **Coercion lives in pi-schema** as an opt-in,
+  the superset of TypeBox's `Value.Convert` rules and pi-ai's own (TypeBox's rule first where they conflict):
+  `compile(schema, { coerce: true })` adds `coerce(value)` (a copy, never mutating) and `parse(value)` (`{ ok, value }
+  | { ok, errors }`); pi-ai uses it for every tool, whatever built the schema (so plain-JSON MCP tools gain the
+  TypeBox rules). **Error texts are pi-schema's own** (no mapping to TypeBox's wording). Extensions keep `Type`,
+  `Static`, `TSchema` from the coding agent's bundled TypeBox (the pi-ai they see is compat plus those); an extension
+  author type-checking against the published pi-ai no longer finds them there (accepted: "fine"). **`format` is an
+  annotation in Chord** ("no format check": no format module in Chord's or Durable's entries; pi-ai still checks
+  formats on tool arguments). **Chord's envelope check costs +10 to +100 ns per message** from untrusted links
+  (pi-schema reads fields by name from a list; no eval): accepted ("negligible"), no hand-written check.
 - **A plugin's npm dependencies are bundled; external only by opt-in (owner, 2026-10-29: "explicit opt in + (a)"):**
   a plugin's `dependencies` are installed into its own `node_modules` (`npm install --ignore-scripts`) and bundled into
   each facet that imports them (host packages, its `peerDependencies`, stay external and are passed in). On Node a
