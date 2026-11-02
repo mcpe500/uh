@@ -40,6 +40,8 @@ export interface Args {
 	export?: string;
 	pipeline?: "baseline" | "u-shaped";
 	slmUrl?: string;
+	/** Enable the U-Harness SLM debug pipeline and its local UI (same as UH_SLM_DEBUG=1). */
+	debug?: boolean;
 	noSkills?: boolean;
 	skills?: string[];
 	promptTemplates?: string[];
@@ -265,6 +267,8 @@ export function parseArgs(args: string[]): Args {
 				result.slmUrl = url;
 				i++;
 			}
+		} else if (arg === "--debug") {
+			result.debug = true;
 		} else if (arg.startsWith("@")) {
 			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
 		} else if (arg.startsWith("--")) {
@@ -328,6 +332,7 @@ ${chalk.bold("Options:")}
   --print, -p                    Non-interactive mode: process prompt and exit
   --pipeline <mode>              U-Harness mode: baseline or u-shaped (default from settings)
   --slm-url <url>                SLM vLLM endpoint URL (e.g. http://localhost:8000/v1)
+  --debug                        Enable the U-Harness SLM debug pipeline and its local UI (same as UH_SLM_DEBUG=1)
   --continue, -c                 Continue the most recent session for the current directory
   --resume, -r                   Pick a session to resume
   --session <path|id>            Open a session by file path or full/partial ID

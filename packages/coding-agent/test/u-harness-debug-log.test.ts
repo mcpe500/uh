@@ -29,6 +29,13 @@ describe("u-harness SLM debug log", () => {
 		expect(isSlmDebugEnabled({})).toBe(false);
 	});
 
+	it("accepts UH_DEBUG as an alias unless UH_SLM_DEBUG overrides it", () => {
+		expect(isSlmDebugEnabled({ UH_DEBUG: "1" })).toBe(true);
+		expect(isSlmDebugEnabled({ UH_DEBUG: "" })).toBe(false);
+		expect(isSlmDebugEnabled({ UH_SLM_DEBUG: "0", UH_DEBUG: "1" })).toBe(false);
+		expect(isSlmDebugEnabled({ UH_SLM_DEBUG: "1", UH_DEBUG: "" })).toBe(true);
+	});
+
 	it("appends masked JSON lines when enabled", () => {
 		const directory = mkdtempSync(join(tmpdir(), "uh-debug-"));
 		directories.push(directory);

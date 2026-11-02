@@ -2,6 +2,19 @@ import { describe, expect, test } from "vitest";
 import { normalizeSessionName, parseArgs } from "../src/cli/args.ts";
 
 describe("parseArgs", () => {
+	describe("--debug flag", () => {
+		test("parses --debug flag", () => {
+			const result = parseArgs(["--debug"]);
+			expect(result.debug).toBe(true);
+		});
+
+		test("parses --debug before a prompt message", () => {
+			const result = parseArgs(["--debug", "fix the bug"]);
+			expect(result.debug).toBe(true);
+			expect(result.messages).toContain("fix the bug");
+		});
+	});
+
 	describe("--version flag", () => {
 		test("parses --version flag", () => {
 			const result = parseArgs(["--version"]);
