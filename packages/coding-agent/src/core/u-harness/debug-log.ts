@@ -11,7 +11,9 @@ import { getAgentDir } from "../../config.ts";
 
 /** True when UH_SLM_DEBUG is set to a non-empty value other than "0"/"false". */
 export function isSlmDebugEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-	const value = env.UH_SLM_DEBUG;
+	// UH_SLM_DEBUG wins when set (so UH_SLM_DEBUG=0 disables even with UH_DEBUG=1);
+	// UH_DEBUG is accepted as an easier-to-guess alias.
+	const value = env.UH_SLM_DEBUG ?? env.UH_DEBUG;
 	return value !== undefined && value !== "" && value !== "0" && value !== "false";
 }
 

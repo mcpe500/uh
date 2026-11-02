@@ -643,6 +643,12 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 	time("parseArgs");
 
+	// `--debug` turns on the U-Harness SLM debug pipeline (log + local UI at :4949).
+	// Must happen before extensions load so the debug UI starts with the session.
+	if (parsed.debug) {
+		process.env.UH_SLM_DEBUG ??= "1";
+	}
+
 	if (parsed.version) {
 		console.log(VERSION);
 		process.exit(0);
