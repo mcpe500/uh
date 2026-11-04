@@ -7,7 +7,7 @@ import type { UHarnessSettings } from "../src/core/settings-schema.ts";
 import { UHarnessBridge } from "../src/core/u-harness/bridge.ts";
 import { ContextLanguageModel } from "../src/core/u-harness/clm.ts";
 import { buildInboundCompressorPrompt, parseArchitecturalBrief } from "../src/core/u-harness/compressor.ts";
-import { extractCanonicalPatches, formatTripletPrompt } from "../src/core/u-harness/decompressor.ts";
+import { extractCanonicalPatches, formatTripletPrompt, stripVerdictLine } from "../src/core/u-harness/decompressor.ts";
 import type { TripletInput } from "../src/core/u-harness/types.ts";
 
 describe("U-Harness Pipeline (METPEN 03)", () => {
@@ -504,5 +504,74 @@ def test_sub():
 			expect(result.patches[0].content).toContain("export function auth()");
 			expect(result.telemetry.durationMs).toBeGreaterThanOrEqual(0);
 		});
+	});
+});
+
+describe("per-request flow (Entity 1-6)", () => {
+	it("Entity 2 builds a per-request compressor prompt from the actual request + ledger", () => {
+		const { buildRequestCompressPrompt } = require("../src/core/u-harness/compressor.ts") as {
+			buildRequestCompressPrompt: (input: { rawRequest: string; ledger: string }) => string;
+		};
+		const prompt = buildRequestCompressPrompt({
+			rawRequest: "read auth.ts returned 300 lines",
+			ledger: "## CURRENT TASK\nFix auth",
+		});
+		expect(prompt).toContain("TUGAS KOMPRESI REQUEST SLM");
+		expect(prompt).toContain("read auth.ts returned 300 lines");
+		expect(prompt).toContain("Fix auth");
+		expect(prompt).toContain("=== REQUEST PADAT ===");
+	});
+
+	it("Entity 4 builds the per-request triplet decompress prompt and strips the verdict", () => {
+		const { buildRequestExpandPrompt } = require("../src/core/u-harness/decompressor.ts") as {
+			buildRequestExpandPrompt: (input: {
+				rawContext: string;
+				compressedRequest: string;
+				coreAnswer: string;
+			}) => string;
+		};
+		const prompt = buildRequestExpandPrompt({
+			rawContext: "const TOKEN = 'x'; // auth.ts",
+			compressedRequest: "perbaiki verifikasi token",
+			coreAnswer: "ganti compareToken dengan verifyJwt",
+		});
+		expect(prompt).toContain("=== 1. KONTEKS MENTAH TERKAIT ===");
+		expect(prompt).toContain("=== 2. REQUEST PADAT ===");
+		expect(prompt).toContain("=== 3. JAWABAN INTI CLOUD ===");
+		expect(prompt).toContain("TUGAS DEKOMPRESI BALASAN SLM");
+
+		const full = "Balasan utuh siap dieksekusi.\nVERDICT: PASS";
+		expect(stripVerdictLine(full)).toBe("Balasan utuh siap dieksekusi.");
+	});
+
+	it("Entity 5 turns canonical ### FILE blocks into write tool calls deterministically", () => {
+		const { patchesToToolCalls } = require("../src/core/u-harness/decompressor.ts") as {
+			patchesToToolCalls: (patches: Array<{ filePath: string; content: string }>) => Array<{
+				type: string;
+				id: string;
+				name: string;
+				arguments: { path: string; content: string };
+			}>;
+		};
+		const calls = patchesToToolCalls([{ filePath: "src/auth.ts", content: "export const ok = true;" }]);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].type).toBe("toolCall");
+		expect(calls[0].name).toBe("write");
+		expect(calls[0].arguments.path).toBe("src/auth.ts");
+		expect(calls[0].arguments.content).toBe("export const ok = true;");
+	});
+
+	it("rejects placeholder briefs instead of injecting SLM template output", () => {
+		const { isPlaceholderBrief } = require("../src/core/u-harness/compressor.ts") as {
+			isPlaceholderBrief: (brief: string) => boolean;
+		};
+		expect(
+			isPlaceholderBrief(
+				"Target function / component: [nama komponen/fungsi dan berkas target]\nRoot cause / problem: [ringkasan masalah 1-2 kalimat]\nPassing criteria: [poin-poin kriteria lulus pengujian]",
+			),
+		).toBe(true);
+		expect(
+			isPlaceholderBrief("Target function: _cstack in modeling/separable.py\nRoot cause: matriks ditimpa angka 1"),
+		).toBe(false);
 	});
 });

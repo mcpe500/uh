@@ -194,14 +194,14 @@ function renderPage(): string {
           <span>ROW 2: LLM (Req 2/3)</span>
           <span class="px-1.5 py-0.5 text-[10px] rounded bg-purple-500/20">main model</span>
         </div>
-        <p class="text-slate-300 leading-relaxed">Prompt berisi <code class="text-amber-300">SPESIFIKASI TUGAS</code> + <code class="text-cyan-300">ARCHITECTURAL BRIEF (dari Row 1)</code> + penalaran inti. Output: solusi/blueprint.</p>
+        <p class="text-slate-300 leading-relaxed">Prompt berisi <code class="text-cyan-300">REQUEST PADAT</code> hasil kompresi SLM + <code class="text-slate-400">CATATAN KONTEKS SESI (CLM)</code>. Output: jawaban inti ringkas.</p>
       </div>
       <div class="p-3 rounded-lg bg-emerald-950/25 border border-emerald-500/30 space-y-1">
         <div class="flex items-center justify-between font-mono font-bold text-emerald-300">
           <span>ROW 3: SLM decompress (Req 3/3)</span>
           <span class="px-1.5 py-0.5 text-[10px] rounded bg-emerald-500/20">SLM</span>
         </div>
-        <p class="text-slate-300 leading-relaxed">Prompt berisi <code class="text-purple-300">BLUEPRINT LLM (dari Row 2)</code> + <code class="text-slate-400">BERKAS TARGET</code> + <strong class="text-emerald-300">TUGAS DEKOMPRESI &amp; PATCH</strong>. Output: patch kode kanonik.</p>
+        <p class="text-slate-300 leading-relaxed">Prompt berisi <code class="text-slate-400">KONTEKS MENTAH</code> + <code class="text-cyan-300">REQUEST PADAT</code> + <code class="text-purple-300">JAWABAN INTI CLOUD</code> (triplet). Output: balasan utuh + <strong class="text-emerald-300">patch ### FILE</strong> yang dieksekusi harness.</p>
       </div>
     </div>
   </section>
@@ -264,9 +264,9 @@ function renderPage(): string {
   // compression, per-step decompression) carry one. Row 1/Row 3 must show the initial
   // prompt, not the newest per-request SLM call.
   function findInitialEntry(entries, runId, event, stage) {
-    for (var i = 0; i < entries.length; i++) {
+    for (var i = entries.length - 1; i >= 0; i--) {
       var e = entries[i];
-      if (e.runId === runId && e.event === event && e.requestIndex === undefined && (stage === undefined || e.stage === stage)) return e;
+      if (e.runId === runId && e.event === event && (stage === undefined || e.stage === stage)) return e;
     }
     return undefined;
   }
@@ -296,17 +296,29 @@ function renderPage(): string {
         r.ms = e.ms;
         r.usage = e.usage;
         if (e.usage && typeof e.usage.input === "number") totalInput += e.usage.input;
-      } else if (e.event === "history-compressed") {
-        r.saved += (e.charsBefore || 0) - (e.charsAfter || 0);
+      } else if (e.event === "request-compressed") {
+        r.saved = (e.charsBefore || 0) - (e.charsAfter || 0);
         if (e.cached) r.cacheHits += 1;
         else saved += (e.charsBefore || 0) - (e.charsAfter || 0);
-      } else if (e.event === "context-projected") {
-        r.projected = e;
-      } else if (e.event === "decompress-ok" && e.stage === "SLM decompress") {
+        r.compressedChars = e.charsAfter;
+      } else if (e.event === "request-skip") {
+        r.compressSkip = e.reason;
+      } else if (e.event === "request-cache-hit") {
+        r.cacheHits += 1;
+      } else if (e.event === "request-expanded") {
         r.verdict = e.verdict;
         r.decompressed = e.outputChars;
-      } else if (e.event === "decompress-skip" && e.stage === "SLM decompress") {
-        r.decompSkip = e.reason;
+        r.patches = e.patches;
+      } else if (e.event === "request-bypass") {
+        r.bypass = (r.bypass ? r.bypass + "; " : "") + e.stage + ": " + e.reason;
+      } else if (e.event === "request" && e.stage === "SLM compress") {
+        r.compressPrompt = e.prompt;
+      } else if (e.event === "response" && e.stage === "SLM compress") {
+        r.compressOutput = e.output;
+      } else if (e.event === "request" && e.stage === "SLM decompress") {
+        r.expandPrompt = e.prompt;
+      } else if (e.event === "response" && e.stage === "SLM decompress") {
+        r.expandOutput = e.output;
       }
     });
     var list = Object.keys(map)
@@ -341,19 +353,33 @@ function renderPage(): string {
         el("span", "text-slate-400", r.ts ? r.ts.slice(11, 19) : "-"),
         el("span", "text-slate-300", r.usage && r.usage.input !== undefined ? "in " + r.usage.input + " tok" : (r.contextChars !== undefined ? "ctx " + r.contextChars + " ch" : "-")),
         el("span", "text-slate-400", r.ms !== undefined ? r.ms + " ms" : ""),
-        el("span", r.saved > 0 ? "text-cyan-300" : "text-slate-500", r.saved > 0 ? "\u2212" + r.saved + " ch" + (r.cacheHits ? " (" + r.cacheHits + " cache)" : "") : "kompres: \u2014"),
+        el("span", r.saved > 0 ? "text-cyan-300" : "text-slate-500", r.saved > 0 ? "\u2212" + r.saved + " ch" + (r.cacheHits ? " (" + r.cacheHits + " cache)" : "") : (r.compressSkip ? "kompres skip" : "kompres: \u2014")),
+        r.patches !== undefined ? el("span", "text-sky-300", r.patches + " patch") : el("span"),
         r.decompressed !== undefined ? el("span", "text-emerald-300", "decomp " + r.decompressed + " ch") : el("span"),
       );
-      if (r.decompSkip) line.append(el("span", "text-amber-300", "decomp skip: " + r.decompSkip));
-      else line.append(verdictBadge(r.verdict));
+      if (r.compressSkip) line.append(el("span", "text-amber-300", "kompres skip: " + r.compressSkip));
+      if (r.bypass) line.append(el("span", "text-amber-300", "bypass: " + r.bypass));
+      line.append(verdictBadge(r.verdict));
       container.append(line);
+
+      var details = el("details", "mt-1 rounded bg-slate-900/60 border border-slate-800/80 px-2 py-1 text-[10px] font-mono text-slate-300");
+      var summary = el("summary", "cursor-pointer text-slate-400 hover:text-slate-200 select-none",
+        "lihat prompt & output SLM aktual request ini");
+      details.append(summary);
+      [["COMPRESS prompt", r.compressPrompt], ["COMPRESS output", r.compressOutput],
+       ["DECOMPRESS prompt", r.expandPrompt], ["DECOMPRESS output", r.expandOutput]].forEach(function (pair) {
+        if (!pair[1]) return;
+        details.append(el("div", "mt-1 text-slate-500 font-bold", pair[0]));
+        details.append(el("pre", "whitespace-pre-wrap break-words text-slate-300", pair[1]));
+      });
+      container.append(details);
     });
     wrap.append(container);
     return wrap;
   }
 
   function buildRow(runId, entries, stageName, stageLabel, requestStage) {
-    var skipped = findEntry(entries, runId, "brief-skipped", stageName);
+    var skipped = findEntry(entries, runId, stageName === "SLM compress" ? "request-skip" : "brief-skipped", stageName);
     var request = stageName === "LLM" ? undefined : findInitialEntry(entries, runId, "request", stageName);
     var response = stageName === "LLM" ? undefined : findInitialEntry(entries, runId, "response", stageName);
     var start = stageName === "LLM" ? findEntry(entries, runId, "llm-start") : undefined;

@@ -208,6 +208,105 @@
         }
       }
     },
+    "uHarness": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "baseline"
+            },
+            {
+              "type": "string",
+              "const": "u-shaped"
+            }
+          ],
+          "default": "u-shaped",
+          "description": "Pipeline architecture: 'baseline' for monolithic cloud or 'u-shaped' for token-efficient dual-model pipeline."
+        },
+        "slm": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "default": "openai"
+            },
+            "baseUrl": {
+              "type": "string",
+              "default": "http://localhost:8000/v1"
+            },
+            "model": {
+              "type": "string",
+              "default": "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+            },
+            "apiKey": {
+              "type": "string",
+              "default": "none"
+            },
+            "maxTokens": {
+              "type": "number",
+              "default": 1024
+            },
+            "temperature": {
+              "type": "number",
+              "default": 0.2
+            },
+            "executablePath": {
+              "type": "string",
+              "description": "Executable used by the Janas local SLM provider."
+            },
+            "perRequestCompression": {
+              "type": "boolean",
+              "description": "Compress old tool results via the SLM before every LLM call (default on). Adds one SLM round-trip per newly aged old message."
+            },
+            "perRequestDecompression": {
+              "type": "boolean",
+              "description": "Expand and verify every assistant step against the brief after each LLM call (default on). Adds one SLM round-trip per step."
+            }
+          }
+        },
+        "coreReasoner": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "default": "deepseek"
+            },
+            "model": {
+              "type": "string",
+              "default": "deepseek-coder"
+            },
+            "temperature": {
+              "type": "number",
+              "default": 0.3
+            }
+          }
+        },
+        "clm": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "workingMemoryPath": {
+              "type": "string",
+              "default": ".context/working_memory.md"
+            }
+          }
+        },
+        "tripletConfluence": {
+          "type": "object",
+          "properties": {
+            "canonicalMarker": {
+              "type": "string",
+              "default": "### FILE:"
+            }
+          }
+        }
+      }
+    },
     "hideThinkingBlock": {
       "type": "boolean",
       "default": false

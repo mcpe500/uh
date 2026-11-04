@@ -1,6 +1,53 @@
 import type { CanonicalPatch, TripletInput } from "./types.ts";
 
 /**
+ * Assembles the per-request triplet decompression prompt (Entity 4): one actual LLM
+ * core answer is expanded against the raw context and the compressed request.
+ */
+export function buildRequestExpandPrompt(input: {
+	rawContext: string;
+	compressedRequest: string;
+	coreAnswer: string;
+}): string {
+	return `=== 1. KONTEKS MENTAH TERKAIT ===
+${input.rawContext || "(tidak ada konteks mentah terkait)"}
+
+=== 2. REQUEST PADAT ===
+${input.compressedRequest}
+
+=== 3. JAWABAN INTI CLOUD ===
+${input.coreAnswer}
+
+TUGAS DEKOMPRESI BALASAN SLM:
+Susun balasan lengkap yang siap dieksekusi oleh Coding Agent berdasarkan jawaban inti cloud di atas dan konteks mentah terkait.
+Aturan:
+1. Jika balasan memuat perubahan berkas, sertakan isi lengkap berkas dengan format:
+### FILE: <path_berkas>
+diikuti isi lengkap berkas tersebut (tanpa placeholder atau komentar TODO).
+2. Jika balasan berupa jawaban/penjelasan/keputusan, tulis versi lengkap dan jelas yang siap dibaca user.
+3. Pertahankan nama simbol, path, dan angka dari konteks mentah.
+4. Akhiri output dengan tepat satu baris berformat:
+VERDICT: PASS|FAIL|PARTIAL|UNKNOWN`;
+}
+
+/** Removes the trailing VERDICT line so it never reaches the agent loop. */
+export function stripVerdictLine(output: string): string {
+	return output.replace(/\n?VERDICT:\s*(PASS|FAIL|PARTIAL|UNKNOWN)\s*$/i, "").trim();
+}
+
+/** Deterministically turns extracted canonical patches into write tool call parts. */
+export function patchesToToolCalls(
+	patches: Array<{ filePath: string; content: string }>,
+): Array<{ type: "toolCall"; id: string; name: string; arguments: { path: string; content: string } }> {
+	return patches.map((patch, index) => ({
+		type: "toolCall" as const,
+		id: `uh_expand_${Date.now()}_${index}`,
+		name: "write",
+		arguments: { path: patch.filePath, content: patch.content },
+	}));
+}
+
+/**
  * Assembles the Triplet Input Confluence required by the SLM Outbound Decompressor.
  * Invariant: Must combine (1) Original Code + (2) Brief + (3) Blueprint.
  */

@@ -70,7 +70,7 @@ export class UHarnessBridge {
 	 * Default caller for SLM via OpenAI-compatible REST endpoint (e.g. vLLM or any
 	 * provider registered in models.json).
 	 */
-	async callSlmDefault(prompt: string, stage = "SLM compress"): Promise<string> {
+	async callSlmDefault(prompt: string, stage = "SLM compress", requestIndex?: number): Promise<string> {
 		const endpoint = await resolveSlmEndpoint(this.settings);
 		const temperature = this.settings.slm?.temperature ?? 0.2;
 		const maxTokens = this.settings.slm?.maxTokens ?? 1024;
@@ -89,6 +89,7 @@ export class UHarnessBridge {
 			appendSlmDebug({
 				event: "request",
 				stage,
+				requestIndex,
 				baseUrl: endpoint.baseUrl,
 				model: endpoint.model,
 				attempt,
@@ -145,6 +146,7 @@ export class UHarnessBridge {
 			appendSlmDebug({
 				event: "response",
 				stage,
+				requestIndex,
 				baseUrl: endpoint.baseUrl,
 				model: endpoint.model,
 				attempt,
