@@ -62,6 +62,10 @@ describe("u-harness debug UI server", () => {
 		expect(page).toContain("run-group");
 		expect(page).toContain("SLM compress");
 		expect(page).toContain("SLM decompress");
+		expect(page).toContain("REQUEST PADAT");
+		expect(page).toContain("KONTEKS MENTAH");
+		expect(page).toContain("request-expanded");
+		expect(page).toContain("request-compressed");
 		expect(page).toContain("/vendor/tailwind.js");
 		expect(page).toContain("/vendor/lucide.min.js");
 		expect(page).toContain("/vendor/fonts/InterVariable.woff2");

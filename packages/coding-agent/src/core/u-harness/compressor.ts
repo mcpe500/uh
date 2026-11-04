@@ -40,8 +40,54 @@ ISI:
 ${text}`;
 }
 
+/** Detects the SLM echoing back the prompt's placeholder template instead of a real brief. */
+export function isPlaceholderBrief(brief: string): boolean {
+	const text = brief.trim();
+	if (!text) return true;
+	const placeholders = [
+		"[nama komponen/fungsi dan berkas target]",
+		"[ringkasan masalah 1-2 kalimat]",
+		"[poin-poin kriteria lulus pengujian]",
+	];
+	const hits = placeholders.filter((marker) => text.includes(marker)).length;
+	return hits >= 2 || /^(TIDAK TERSEDIA|TIDAK DAPAT DITENTUKAN)/im.test(text);
+}
+
 /**
- * Parses raw text output from the SLM into an ArchitecturalBrief object.
+ * Per-request compressor prompt (Entity 2): compresses ONE actual LLM request
+ * against the current CLM ledger, keeping intent, symbols, and constraints.
+ */
+export function buildRequestCompressPrompt(input: { rawRequest: string; ledger: string }): string {
+	return `=== CATATAN KONTEKS SESI (CLM) ===
+${input.ledger || "(kosong)"}
+=== END CATATAN ===
+
+=== REQUEST MENTAH KE LLM ===
+${input.rawRequest}
+=== END REQUEST ===
+
+TUGAS KOMPRESI REQUEST SLM:
+Padatkan request mentah di atas menjadi request padat untuk LLM cloud.
+Pertahankan: tujuan user, path berkas, nama simbol/fungsi, angka, error, dan keputusan penting.
+Lakukan grounding: hanya sebut nama fungsi/variabel yang benar-benar ada di request mentah.
+Buang: boilerplate, log berulang, dan isi yang tidak memengaruhi langkah berikutnya.
+Hasilkan output padat strictly dengan format berikut:
+
+=== REQUEST PADAT ===
+(maksimal ~150 kata, sudah mencakup tujuan + fakta penting)
+=== END REQUEST PADAT ===`;
+}
+
+/** Extracts the compressed request block; falls back to the raw output when unmarked. */
+export function parseCompressedRequest(raw: string): string {
+	const match = raw.match(/=== REQUEST PADAT ===([\s\S]*?)=== END REQUEST PADAT ===/);
+	const content = (match ? match[1] : raw).trim();
+	return content || raw.trim();
+}
+
+/**
+ * Parses briefs:
+ * Architetural brief output.
  */
 export function parseArchitecturalBrief(rawOutput: string): ArchitecturalBrief {
 	const briefMatch = rawOutput.match(/=== ARCHITECTURAL BRIEF ===([\s\S]*?)=== END BRIEF ===/);
